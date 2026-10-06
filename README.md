@@ -1,0 +1,2 @@
+# study
+check git avability 
