@@ -1,0 +1,335 @@
+LIB CONNECT TO 'staroks (BKS)';
+[ANL]:
+LOAD
+    Capitalize(EMPLOYEE_NAME)                               as [Сотрудник],
+    BUNDLE_NUMBER                                           as [Номер связки],
+    DOCS_IN_BUNDLE                                          as [Кол-во документов в связке],
+    TYPE                                                    as [Тип связки],
+    
+    // Форматирование периодов
+    MonthName(CREATED_DATE)                                 as [Месяц],
+    Date(Floor(CREATED_DATE), 'DD.MM.YYYY')                 as [День],
+    
+    // Дата и Время поступления
+    Timestamp(CREATED_DATE, 'DD.MM.YYYY hh:mm:ss')          as [Дата поступления],
+    
+    // Процесс подготовки и верификации
+    Timestamp(WORK_START_DATE, 'DD.MM.YYYY hh:mm:ss')       as [Время принятия в работу],
+    Timestamp(WORK_END_DATE, 'DD.MM.YYYY hh:mm:ss')         as [Время окончания работы],
+    Time(DIFF, 'hh:mm:ss')                                  as [Затраченное время],
+    STATUS                                                  as [Статус заявки],
+    Timestamp(WORK_START_DATE, 'DD.MM.YYYY hh:mm:ss')       as [Начало подготовки],
+    Timestamp(SCAN_START_DATE, 'DD.MM.YYYY hh:mm:ss')       as [Конец подготовки],
+    Time(DIFF_2, 'hh:mm:ss')                                as [Время подготовки],
+    
+    // Сканирование
+    Time(DIFF_3, 'hh:mm:ss')                                as [Время сканирования],
+    Timestamp(SCAN_START_DATE, 'DD.MM.YYYY hh:mm:ss')       as [Начало сканирования],
+    Timestamp(SCAN_END_DATE, 'DD.MM.YYYY hh:mm:ss')         as [Конец сканирования],
+    Time(DIFF_4, 'hh:mm:ss')                                as [Время синхранизации],
+    
+    // Распознавание
+    Timestamp(RECOGNITION_START_DATE, 'DD.MM.YYYY hh:mm:ss') as [Начало распознавания],
+    Timestamp(RECOGNITION_END_DATE, 'DD.MM.YYYY hh:mm:ss')   as [Конец распознавания],
+    Time(DIFF_5, 'hh:mm:ss')                                as [Время распознования],
+    DOCS_RECOGNIZED                                         as [Распознано док],
+    DOCS_NOT_RECOGNIZED                                     as [НЕ распознано док],
+    
+    // Верификация
+    Timestamp(RECOGNITION_END_DATE, 'DD.MM.YYYY hh:mm:ss')   as [Начало верификации],
+    Timestamp(WORK_END_DATE, 'DD.MM.YYYY hh:mm:ss')         as [Конец верификации],
+    Time(DIFF_6, 'hh:mm:ss')                                as [Время верификации],
+    Timestamp(RECOGNITION_END_DATE_FINAL, 'DD.MM.YYYY hh:mm:ss') as [Распознано (Дата и время)],
+    
+    // Рекламации и листы
+    SYSTEM_CLAIMS                                           as [Кол во выявленных рекламаций системой],
+    DELETED_CLAIMS                                          as [Кол во удаленных рекламаций],
+    ADDED_CLAIMS                                            as [Кол во добавленных рекламаций],
+    CONFIRMED_CLAIMS                                        as [Кол во подтвержденных рекламаций],
+    PAGES_NOT_RECOGNIZED                                    as [Кол-во листов],
+    
+    // Флаг (используем Floor, чтобы сравнивать чистые даты без учета времени)
+    If(Floor(WORK_START_DATE) = Floor(WORK_END_DATE), 1, 0) as flag_fast_end 
+;
+SQL
+
+/*Отчет по ЦА*/
+
+/*WITH FLG AS (
+SELECT DISTINCT
+B.`S$KAFKA_TIMESTAMP` AS CHANGE_DATE,
+DE.EMPLOYEE_LOGIN AS EMPLOYEE_LOGIN,
+DE.DWH_ID AS EMPL_ID,*/
+/*B.LOGIN, -- СОТРУДНИК
+MYUPPERCASE(DE.EMPLOYEE_LOGIN) as ffrg,
+MYUPPERCASE(LOGIN) as rr,*/
+/*DE.EMPLOYEE_NAME AS EMPLOYEE_NAME, -- СОТРУДНИК
+B.BUNDLE_NUMBER AS BUNDLE_NUMBER, -- НОМЕР СВЯЗКИ
+B.DOCS_IN_BUNDLE AS DOCS_IN_BUNDLE, -- КОЛ-ВО ДОК В СВЯЗКЕ
+substring(B.BUNDLE_NUMBER, 1, 2) AS TYPE, -- ТИП СВЯЗКИ
+B.CREATED_DATE, -- ДАТА ПОСТУПЛЕНИЯ
+B.WORK_START_DATE AS WORK_START_DATE, -- ВРЕМЯ ПРИНЯТИЯ В РАБОТУ
+B.WORK_END_DATE AS WORK_END_DATE, -- ВРЕМЯ ОКОНЧАНИЯ РАБОТЫ,
+date_format(timediff(WORK_END_DATE,WORK_START_DATE),'%H:%i:%s') AS DIFF, -- ЗАТРАЧЕННОЕ ВРЕМЯ
+B.STATUS AS STATUS, -- СТАТУС ЗАЯВКИ
+B.WORK_START_DATE AS START_PREPARE, -- НАЧАЛО ПОДГОТОВКИ
+B.SCAN_START_DATE AS END_PREPARE,-- КОНЕЦ ПОДГОТОВКИ
+date_format(timediff(B.SCAN_START_DATE,B.CREATED_DATE),'%H:%i:%s') AS DIFF_2, -- Время подготовки
+B.SCAN_START_DATE AS SCAN_START_DATE, -- НАЧАЛО СКАНИРОВАНИЯ
+B.SCAN_END_DATE AS SCAN_END_DATE, -- КОНЕЦ СКАНИРОВАНИЯ
+date_format(timediff(B.SCAN_END_DATE,B.SCAN_START_DATE),'%H:%i:%s') AS DIFF_3,-- Время сканирования
+date_format(timediff(B.RECOGNITION_START_DATE,B.SCAN_END_DATE),'%H:%i:%s') AS DIFF_4,-- Время синханизации
+B.RECOGNITION_START_DATE, -- НАЧАЛО РАСПОЗНАВАНИЯ
+B.RECOGNITION_END_DATE, -- КОНЕЦ РАСПОЗНАВАНИЯ
+date_format(timediff(B.RECOGNITION_END_DATE,B.RECOGNITION_START_DATE),'%H:%i:%s') AS DIFF_5, -- Время распознования
+B.DOCS_RECOGNIZED, -- РАСПОЗНАНО ДОК
+B.DOCS_NOT_RECOGNIZED, -- НЕ РАСПОЗНАНО ДОК
+B.RECOGNITION_END_DATE AS START_VERIFICATION,-- НАЧАЛО ВЕРИФИКАЦИИ
+B.WORK_END_DATE AS END_VERIFICATION, -- КОНЕЦ ВЕРИФИКАЦИИ
+date_format(timediff(B.WORK_END_DATE,B.RECOGNITION_END_DATE),'%H:%i:%s') AS DIFF_6, -- Время верификации
+DENSE_RANK() OVER(PARTITION BY B.bundle_number ORDER BY B.`s$change_date` DESC) AS BUNDLE_LS,
+B.RECOGNITION_END_DATE_FINAL, -- Распознано (Дата и время) 
+B.SYSTEM_CLAIMS, -- Кол во выявленных рекламаций системой
+B.DELETED_CLAIMS, -- Кол во удаленных рекламаций
+B.ADDED_CLAIMS, -- Кол во добавленных рекламаций
+B.CONFIRMED_CLAIMS, -- Кол во подтвержденных рекламаций
+B.PAGES_IN_BUNDLE -- "кол-во листов"
+FROM BI_VIEW.S0266_EVENT_BUNDLE B
+JOIN SS_NEW.D_EMPLOYEE DE
+ON MYUPPERCASE(DE.EMPLOYEE_LOGIN) = MYUPPERCASE(B.LOGIN)
+AND DE.ROW_STATUS  = 'A'
+AND DE.SOURCE_SYSTEM = 8)
+
+SELECT
+CHANGE_DATE,
+EMPLOYEE_LOGIN,
+EMPL_ID,
+EMPLOYEE_NAME,
+BUNDLE_NUMBER,
+DOCS_IN_BUNDLE,
+TYPE,
+CREATED_DATE,
+WORK_START_DATE,
+WORK_END_DATE,
+DIFF,
+STATUS,
+START_PREPARE,
+END_PREPARE,
+DIFF_2,
+SCAN_START_DATE,
+SCAN_END_DATE,
+DIFF_3,
+DIFF_4,
+RECOGNITION_START_DATE,
+RECOGNITION_END_DATE,
+DIFF_5,
+DOCS_RECOGNIZED,
+DOCS_NOT_RECOGNIZED,
+START_VERIFICATION,
+END_VERIFICATION,
+DIFF_6,
+RECOGNITION_END_DATE_FINAL,
+SYSTEM_CLAIMS,
+DELETED_CLAIMS,
+ADDED_CLAIMS,
+CONFIRMED_CLAIMS,
+PAGES_IN_BUNDLE
+//-- date_format(SUM(DIFF_6) + SUM(DIFF_2),'%H:%i:%s') AS AVG_TIME -- Среднее время затраченное сотрудником
+//-- date_format(SUM(B.WORK_END_DATE,B.RECOGNITION_END_DATE),'%H:%i:%s') AS SYS_TIME -- Время затраченное системой
+FROM FLG
+WHERE BUNDLE_LS = 1;*/
+
+WITH
+ACT AS (
+SELECT DISTINCT
+B.`S$KAFKA_TIMESTAMP` AS CHANGE_DATE,
+/*DE.EMPLOYEE_LOGIN AS EMPLOYEE_LOGIN,
+DE.DWH_ID AS EMPL_ID,
+DE.EMPLOYEE_NAME AS EMPLOYEE_NAME, -- СОТРУДНИК*/
+B.BUNDLE_NUMBER AS BUNDLE_NUMBER, -- НОМЕР СВЯЗКИ
+B.DOCS_IN_BUNDLE AS DOCS_IN_BUNDLE, -- КОЛ-ВО ДОК В СВЯЗКЕ
+substring(B.BUNDLE_NUMBER, 1, 2) AS TYPE,
+B.PAGES_NOT_RECOGNIZED
+FROM BI_VIEW.S0266_EVENT_BUNDLE B
+/*JOIN SS_NEW.D_EMPLOYEE DE
+ON MYUPPERCASE(DE.EMPLOYEE_LOGIN) = MYUPPERCASE(B.LOGIN)
+AND DE.ROW_STATUS  = 'A'
+AND DE.SOURCE_SYSTEM = 8*/
+WHERE B.ACTION = 'scanfinish')
+,
+EVENT AS (SELECT 
+    bundle_number, 
+    `s$change_date`, 
+    `s$kafka_timestamp`, 
+    `action`, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(created_date, INTERVAL 5 HOUR) 
+        ELSE created_date 
+    END as created_date, 
+    docs_in_bundle, 
+    docs_not_recognized, 
+    docs_recognized, 
+    eventType, 
+    folders_not_recognized, 
+    login, 
+    messageId, 
+    `number`, 
+    pages_in_bundle, 
+    pages_not_recognized, 
+    pages_recognized, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(recognition_start_date, INTERVAL 5 HOUR) 
+        ELSE recognition_start_date 
+    END as recognition_start_date, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(recognition_end_date, INTERVAL 5 HOUR) 
+        ELSE recognition_end_date 
+    END as recognition_end_date,
+    scan_end_date, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(scan_start_date, INTERVAL 5 HOUR) 
+        ELSE scan_start_date 
+    END as scan_start_date, 
+    status, 
+    `timestamp`, 
+    `type`, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(work_end_date, INTERVAL 5 HOUR) 
+        ELSE work_end_date 
+    END as work_end_date,
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(work_start_date, INTERVAL 5 HOUR) 
+        ELSE work_start_date 
+    END as work_start_date, 
+    CASE 
+        WHEN created_date >= '2026-07-03 12:04:08' THEN DATE_ADD(recognition_end_date_final, INTERVAL 5 HOUR) 
+        ELSE recognition_end_date_final 
+    END as recognition_end_date_final, 
+    system_claims, 
+    deleted_claims, 
+    added_claims, 
+    confirmed_claims, 
+    mvd_id
+FROM BI_VIEW.S0266_EVENT_BUNDLE),
+FLG AS (
+SELECT DISTINCT
+B.`S$KAFKA_TIMESTAMP` AS CHANGE_DATE,
+DE.EMPLOYEE_LOGIN AS EMPLOYEE_LOGIN,
+DE.DWH_ID AS EMPL_ID,
+/*B.LOGIN, -- СОТРУДНИК
+MYUPPERCASE(DE.EMPLOYEE_LOGIN) as ffrg,
+MYUPPERCASE(LOGIN) as rr,*/
+DE.EMPLOYEE_NAME AS EMPLOYEE_NAME, -- СОТРУДНИК
+B.BUNDLE_NUMBER AS BUNDLE_NUMBER, -- НОМЕР СВЯЗКИ
+B.DOCS_IN_BUNDLE AS DOCS_IN_BUNDLE, -- КОЛ-ВО ДОК В СВЯЗКЕ
+substring(B.BUNDLE_NUMBER, 1, 2) AS TYPE, -- ТИП СВЯЗКИ
+B.CREATED_DATE, -- ДАТА ПОСТУПЛЕНИЯ
+B.WORK_START_DATE AS WORK_START_DATE, -- ВРЕМЯ ПРИНЯТИЯ В РАБОТУ
+B.WORK_END_DATE AS WORK_END_DATE, -- ВРЕМЯ ОКОНЧАНИЯ РАБОТЫ,
+date_format(timediff(WORK_END_DATE,WORK_START_DATE),'%H:%i:%s') AS DIFF, -- ЗАТРАЧЕННОЕ ВРЕМЯ
+B.STATUS AS STATUS, -- СТАТУС ЗАЯВКИ
+B.WORK_START_DATE AS START_PREPARE, -- НАЧАЛО ПОДГОТОВКИ
+B.SCAN_START_DATE AS END_PREPARE,-- КОНЕЦ ПОДГОТОВКИ
+date_format(timediff(B.SCAN_START_DATE,B.CREATED_DATE),'%H:%i:%s') AS DIFF_2, -- Время подготовки
+B.SCAN_START_DATE AS SCAN_START_DATE, -- НАЧАЛО СКАНИРОВАНИЯ
+B.SCAN_END_DATE AS SCAN_END_DATE, -- КОНЕЦ СКАНИРОВАНИЯ
+date_format(timediff(B.SCAN_END_DATE,B.SCAN_START_DATE),'%H:%i:%s') AS DIFF_3,-- Время сканирования
+date_format(timediff(B.RECOGNITION_START_DATE,B.SCAN_END_DATE),'%H:%i:%s') AS DIFF_4,-- Время синханизации
+B.RECOGNITION_START_DATE, -- НАЧАЛО РАСПОЗНАВАНИЯ
+COALESCE(B.RECOGNITION_END_DATE, B.RECOGNITION_END_DATE_FINAL) as RECOGNITION_END_DATE, -- КОНЕЦ РАСПОЗНАВАНИЯ
+date_format(timediff(COALESCE(B.RECOGNITION_END_DATE, B.RECOGNITION_END_DATE_FINAL),B.RECOGNITION_START_DATE),'%H:%i:%s') AS DIFF_5, -- Время распознования
+B.DOCS_RECOGNIZED, -- РАСПОЗНАНО ДОК
+B.DOCS_NOT_RECOGNIZED, -- НЕ РАСПОЗНАНО ДОК
+COALESCE(B.RECOGNITION_END_DATE, B.RECOGNITION_END_DATE_FINAL) AS START_VERIFICATION,-- НАЧАЛО ВЕРИФИКАЦИИ
+B.WORK_END_DATE AS END_VERIFICATION, -- КОНЕЦ ВЕРИФИКАЦИИ
+date_format(timediff(B.WORK_END_DATE,COALESCE(B.RECOGNITION_END_DATE, B.RECOGNITION_END_DATE_FINAL)),'%H:%i:%s') AS DIFF_6, -- Время верификации
+DENSE_RANK() OVER(PARTITION BY B.bundle_number ORDER BY B.`s$change_date` DESC) AS BUNDLE_LS,
+B.RECOGNITION_END_DATE_FINAL, -- Распознано (Дата и время) 
+B.SYSTEM_CLAIMS, -- Кол во выявленных рекламаций системой
+B.DELETED_CLAIMS, -- Кол во удаленных рекламаций
+B.ADDED_CLAIMS, -- Кол во добавленных рекламаций
+B.CONFIRMED_CLAIMS, -- Кол во подтвержденных рекламаций
+B.PAGES_IN_BUNDLE, -- "кол-во листов"
+/*CASE WHEN B.ACTION = 'scanfinish' THEN B.PAGES_NOT_RECOGNIZED ELSE 0 END AS PAGES_NOT_RECOGNIZED, /*KBI-22436 - берем от статуса scanfinish*/
+B.ACTION
+FROM EVENT B
+JOIN SS_NEW.D_EMPLOYEE DE
+ON UPPER(DE.EMPLOYEE_LOGIN) = UPPER(B.LOGIN)
+AND DE.S_ROW_STATUS  = 'A'
+AND DE.S_SOURCE_SYSTEM = 8)
+ 
+SELECT
+FLG.CHANGE_DATE,
+FLG.EMPLOYEE_LOGIN,
+FLG.EMPL_ID,
+FLG.EMPLOYEE_NAME,
+FLG.BUNDLE_NUMBER,
+FLG.DOCS_IN_BUNDLE,
+FLG.TYPE,
+FLG.CREATED_DATE,
+FLG.WORK_START_DATE,
+FLG.WORK_END_DATE,
+FLG.DIFF,
+FLG.STATUS,
+FLG.START_PREPARE,
+FLG.END_PREPARE,
+FLG.DIFF_2,
+FLG.SCAN_START_DATE,
+FLG.SCAN_END_DATE,
+FLG.DIFF_3,
+FLG.DIFF_4,
+FLG.RECOGNITION_START_DATE,
+FLG.RECOGNITION_END_DATE,
+FLG.DIFF_5,
+FLG.DOCS_RECOGNIZED,
+FLG.DOCS_NOT_RECOGNIZED,
+FLG.START_VERIFICATION,
+FLG.END_VERIFICATION,
+FLG.DIFF_6,
+FLG.RECOGNITION_END_DATE_FINAL,
+FLG.SYSTEM_CLAIMS,
+FLG.DELETED_CLAIMS,
+FLG.ADDED_CLAIMS,
+FLG.CONFIRMED_CLAIMS,
+FLG.PAGES_IN_BUNDLE,
+ACT.PAGES_NOT_RECOGNIZED
+-- // -- date_format(SUM(DIFF_6) + SUM(DIFF_2),'%H:%i:%s') AS AVG_TIME -- Среднее время затраченное сотрудником
+-- // -- date_format(SUM(B.WORK_END_DATE,B.RECOGNITION_END_DATE),'%H:%i:%s') AS SYS_TIME -- Время затраченное системой
+FROM FLG
+JOIN ACT
+ON ACT.BUNDLE_NUMBER = FLG.BUNDLE_NUMBER
+WHERE FLG.BUNDLE_LS = 1;
+
+Date_Bounds:
+LOAD
+    Min([День]) as MinDate,
+    Max([День]) as MaxDate
+RESIDENT ANL;
+
+LET vMinDate = Num(Peek('MinDate', 0, 'Date_Bounds'));
+LET vMaxDate = Num(Peek('MaxDate', 0, 'Date_Bounds'));
+DROP TABLE Date_Bounds;
+
+
+Calendar_Base:
+LOAD
+    $(vMinDate) + RowNo() - 1 as DateNum
+AUTOGENERATE ($(vMaxDate) - $(vMinDate) + 1);
+
+
+MasterCalendar:
+LOAD
+    Date(DateNum, 'YYYY-MM-DD')                   as [День], 
+    Day(DateNum)                                  as [День месяца],
+    WeekDay(DateNum)                              as [День недели],
+    
+    Week(DateNum)                                 as [Номер недели],
+    WeekYear(DateNum)                             as [Год недели],
+    WeekYear(DateNum) & '-W' & Num(Week(DateNum), '00') as [Неделя], 
+    Year(DateNum)                                 as [Год],
+    InYearToDate(DateNum, Today(), 0)             as [YTD_Флаг]
+RESIDENT Calendar_Base
+WHERE Num(WeekDay(DateNum)) < 5; // Пн, Вт, Ср, Чт, Пт
+
+
+DROP TABLE Calendar_Base;

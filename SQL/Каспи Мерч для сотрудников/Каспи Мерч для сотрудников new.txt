@@ -1,0 +1,751 @@
+KASPI_EMP:
+LOAD
+    distinct Upper(PurgeChar(STATUS_FIO, ' ')) as KEY_FIO
+FROM [lib://QVD Tables/HR/STATUS.qvd] (qvd)
+WHERE Match([Тип записи],
+            'действующий',
+            'длительное отсутствие',
+            'переходный период') AND MATCH([Дата], Date(Today()-2, 'DD.MM.YYYY'));
+
+
+LEFT JOIN (KASPI_EMP)
+load
+BUYER_FIO,
+Upper(PurgeChar(BUYER_FIO, ' ')) as KEY_FIO,
+POSITION,
+ID;
+sql
+WITH emp_pos as 
+(SELECT 
+	t1.ID,
+	FIO AS BUYER_FIO, 
+    POSITION, 
+    HIRING_DATE, 
+    row_number() over(partition by FIO order by HIRING_DATE DESC) as rn 
+FROM (SELECT 
+	CONCAT_WS(' ', `LAST_NAME`, `FIRST_NAME`,IF(TRIM(`MIDDLE_NAME`) = '' OR ISNULL(`MIDDLE_NAME`), NULL, `MIDDLE_NAME`)) FIO,
+    POSITION,
+    HIRING_DATE,
+    up.ID
+FROM S0008.EMPLOYEES es LEFT JOIN (SELECT ID, POSITION FROM S0008.USERS_POSITIONS) up ON up.ID = es.POSITION_ID) t1)
+SELECT DISTINCT BUYER_FIO, POSITION, ID from emp_pos WHERE rn = 1;
+
+LEFT JOIN (KASPI_EMP)
+LOAD
+    ID,
+    Класс AS category
+FROM [lib://AttachedFiles/Position ID CATEGORY.xlsx]
+(ooxml, embedded labels, table is _xlnm._FilterDatabase);
+
+
+STATUS_MAP:
+Mapping
+LOAD
+    Num(UNIID)     AS BUYER_IIN,   
+    Trim(STATUS_FIO) AS BUYER_FIO
+FROM [lib://QVD Tables/HR/STATUS.qvd] (qvd)
+WHERE Match([Тип записи],
+            'действующий',
+            'длительное отсутствие',
+            'переходный период');
+
+City_Region_Mapping:
+MAPPING LOAD * INLINE [
+    CITYTO, Region
+    Актау, Мангистауская область
+    Актобе, Актюбинская область
+    Алматы, Алматы
+    Астана, Астана
+    Атырау, Атырауская область
+    Караганда, Карагандинская область
+    Костанай, Костанайская область
+    Павлодар, Павлодарская область
+    Петропавловск, Северо-Казахстанская область
+    Шымкент, Шымкент
+    Семей, Абайская область
+    Туркестан, Туркестанская область
+    Усть-Каменогорск, Восточно-Казахстанская область
+    Уральск, Западно-Казахстанская область
+    Кызылорда, Кызылординская область
+    Талдыкорган, Жетысуская область
+    Кокшетау, Акмолинская область
+    Жезказган, Улытауская область
+    Конаев, Алматинская область
+    Темиртау, Карагандинская область
+    Балхаш, Карагандинская область
+    Жезказган, Улытауская область
+    Сатпаев, Улытауская область
+    Экибастуз, Павлодарская область
+    Аксу, Павлодарская область
+    Рудный, Костанайская область
+    Аркалык, Костанайская область
+    Тобыл, Костанайская область
+    Степногорск, Акмолинская область
+    Щучинск, Акмолинская область
+    Капшагай, Алматинская область
+    Талгар, Алматинская область
+    Арыс, Туркестанская область
+    Кентау, Туркестанская область
+    Жанаозен, Мангистауская область
+    Кульсары, Атырауская область
+    Зайсан, Восточно-Казахстанская область
+    Риддер, Восточно-Казахстанская область
+    Ушарал, Жетысуская область
+    Талдыкорган, Жетысуская область
+    Шу, Жамбылская область
+    Тараз, Жамбылская область
+    Аксай, Западно-Казахстанская область
+    Лисаковск, Костанайская область
+    Каскелен, Алматинская область
+    Отеген батыр, Алматинская область
+    Абай, Карагандинская область
+    Сарань, Карагандинская область
+    Бородулиха, Абайская область
+    Туздыбастау, Алматинская область
+    Бесагаш, Алматинская область
+    Мухаметжан Туймебаева, Алматинская область
+    Топар, Карагандинская область
+    Узынагаш, Алматинская область
+	Есик, Алматинская область
+    Ленгер, Туркестанская область
+	Сарыкемер, Жамбылская область
+	Гульдала, Алматинская область
+	Жаркент, Жетысуская область
+	Каратау, Жамбылская область
+    Сарыагаш, Туркестанская область
+	Текели, Жетысуская область
+	Ават (Алм.Обл), Алматинская область
+	Алтай, Восточно-Казахстанская область
+	Жибек Жолы (Шамалган), Алматинская область
+	Коксай, Алматинская область
+    Красный Яр, Акмолинская область
+	Мерке, Жамбылская область
+	Райымбек, Алматинская область
+	Серебрянск, Восточно-Казахстанская область
+	Чунджа, Алматинская область
+    Шелек, Алматинская область
+    Алатау (Жетыген), Алматинская область
+	Зачаганск, Западно-Казахстанская область
+    Кандыагаш, Актюбинская область
+	Сарканд, Жетысуская область
+    Турар Рыскулов, Туркестанская область
+    Чапаево, Западно-Казахстанская область
+	Шахтинск, Карагандинская область
+    Жайрем, Улытауская область
+    Косшы, Акмолинская область
+    Караоткель, Акмолинская область
+    Иргели, Алматинская область
+    Аягоз, Абайская область
+];
+
+LET V_MINDATE = MakeDate(2024,10,01);
+LET V_MINDATE_N = Floor(num(V_MINDATE));
+LET V_MAXDATE = Floor(num(Today()));
+trace V_MINDATE_N = $(V_MINDATE_N);
+trace V_MAXDATE = $(V_MAXDATE);
+
+
+
+            
+            
+GENDER_MAP:
+Mapping
+LOAD
+    PurgeChar(Upper(Trim(EMPLOYEE_NAME)),' ')                               AS FIO_KEY,
+    If(Upper(GENDER)='F','Жен', If(Upper(GENDER)='M','Муж', Null()))        AS GENDER_TXT
+    
+;
+SQL
+WITH ranked AS (
+    SELECT EMPLOYEE_NAME,
+           GENDER,
+           S_CHANGE_DATE,
+           ROW_NUMBER() OVER (
+               PARTITION BY EMPLOYEE_NAME
+               ORDER BY CASE WHEN GENDER IS NULL THEN 1 ELSE 0 END,
+                        S_CHANGE_DATE DESC
+           ) rn
+      FROM SS_NEW.D_EMPLOYEE
+)
+SELECT EMPLOYEE_NAME,
+       GENDER
+  FROM ranked
+ WHERE rn = 1;
+ 
+ 
+NUM_PRODUCT:
+LOAD *;
+select
+    q.sku,
+    q.product,
+    CONCAT(q.product, ' ', ROW_NUMBER() OVER (PARTITION BY q.product ORDER BY sku)) AS new_product
+      from (select
+         		t.sku,
+         		t.product,
+                t.merchant,
+                count() over(partition by t.sku) cnt_sku,
+                count() over(partition by t.product) cnt_product
+             from BI.stock_merch_v t
+             where upper(t.code) like upper('%Kaspi%')
+                   and t.merchant = 'Ucon store') q
+    where 1 = 1
+    and q.cnt_sku = 1
+    and q.cnt_product > 1;
+
+Map_NewProduct:
+MAPPING LOAD
+    sku,
+    new_product
+RESIDENT NUM_PRODUCT;
+
+DEP_TABLE:
+load INN as BUYER_IIN, department_id as DEPART_ID;
+SQL
+SELECT INN, max(department_id) as department_id FROM SS_NEW.D_EMPLOYEE de WHERE S_ROW_STATUS = 'A' GROUP BY INN;
+
+Hierarchy (DEPART_ID, PARENT_DEPART_ID, DEPART_NAME, ParentName, DEPART_NAME, DEPART_PATH, '/', DEPART_LEVEL)
+Load 
+DEPART_ID,
+PARENT_DEPART_ID,
+DEPART_NAME
+;
+sql
+WITH TT AS (
+    SELECT /*+ PARALLEL(16)*/
+           DISTINCT
+           DE.DEPARTMENT_ID
+    FROM BI.F$KM_ORDERS T
+    JOIN BI.D$KM_ORDERENTRIES E ON T.ORDERPK = E.ORDERPK
+    JOIN BI.stock_merch_v S ON S.SKU = E.SKU
+    JOIN SS_NEW.D_EMPLOYEE DE ON DE.INN = T.IIN AND S_ROW_STATUS = 'A'
+    LEFT JOIN BI_VIEW.S0043_SHOP_CUSTOMER_REVIEW_JSON PR ON PR.order_code = T.ORDERCODE AND PR.order_code = S.SKU
+    WHERE 1 = 1 
+    AND T.MERCHANT_ID = 8804711147281
+    and upper(S.code) like upper('%Kaspi%')
+    AND T.ORDERDATE >= STR_TO_DATE('$(V_MINDATE)', '%d.%m.%Y')
+)
+SELECT DISTINCT 
+       D.DWH_ID as DEPART_ID,
+       D.HIGH_DEPART_ID PARENT_DEPART_ID,
+       DEPART_NAME
+FROM SS_NEW.D_DEPARTMENT_MAIN_OLD D;
+ 
+LIB CONNECT TO 'staroks (BKS)';
+    
+TEMP_SQL_DATA:
+SQL
+SELECT 
+    t.iin,
+    t.orderdate,
+    t.createdts,
+    t.orderstatus,
+    t.ordercode,
+    e.baseprice,
+    e.totalprice,
+    e.quantity,
+    s.lbl AS product,
+    s.sku,
+    case
+     when cityto = 'Нур-Султан' 
+     then 'Астана'
+     else cityto
+     end CITYTO,
+     case
+     when cityfr = 'Нур-Султан' 
+     then 'Астана'
+     else cityfr 
+     end CITYFR,
+     created_at as DT_CREATE,
+     LEAST(
+        12 + TIMESTAMPDIFF(MONTH, '2025-09-01', CURDATE()), 
+        GREATEST(1, ROUND(DATEDIFF(CURDATE(), created_at) / 31))
+    ) AS FINAL_MONTH_DIVISOR,
+    p_cancellationreason,
+    DENSE_RANK() OVER(PARTITION BY t.iin ORDER BY t.createdts, ordercode) as P_ORDER_NUM
+FROM BI.s43$ord_v t
+JOIN (SELECT quantity, totalprice, baseprice, sku, p_order FROM BI.s43$orderentries_v GROUP BY 1, 2, 3, 4, 5) e 
+    ON t.order_pk = e.p_order
+JOIN BI.s43$prod_master_v s 
+    ON s.sku = e.sku
+WHERE t.merch_id = 92448 AND s.brand_id = 103280;
+  
+  
+ORDERS:
+LOAD
+    iin AS BUYER_IIN,
+    ApplyMap('STATUS_MAP', Num(iin), Null()) AS BUYER_FIO,
+    
+    // --- Логика определения пола ---
+    If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'1','3','5'), 'Муж',
+        If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'2','4','6'), 'Жен',
+            If(WildMatch(Upper(ApplyMap('STATUS_MAP', Num(iin), Null())),'ОВНА','ЕВНА','КЫЗЫ','ГЫЗЫ','ҚЫЗЫ'), 'Жен',
+                If(WildMatch(Upper(ApplyMap('STATUS_MAP', Num(iin), Null())),'ОВИЧ','ЕВИЧ','ОГЛЫ','УЛЫ','ҰЛЫ', 'ХАНАТМУХАМБЕТ'), 'Муж',
+                    ApplyMap('GENDER_MAP', PurgeChar(Upper(Trim(ApplyMap('STATUS_MAP', Num(iin), Null()))),' '), 'Неизвестно')
+                )
+            )
+        )
+    ) AS BUYER_GENDER,
+	Right('000000000000' & Text(iin),12)    AS IIN_STR,
+    // --- Логика даты рождения и возраста ---
+    Date(MakeDate(
+        If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'1','2'), 1800,
+            If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'3','4'), 1900,
+                If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'5','6'), 2000,
+                    If(Num(Left(Right('000000000000' & Text(iin),12),2)) <= Mod(Year(Today(1)),100), 2000, 1900)
+                )
+            )
+        ) + Num(Left(Right('000000000000' & Text(iin),12),2)),
+        Num(Mid(Right('000000000000' & Text(iin),12),3,2)),
+        Num(Mid(Right('000000000000' & Text(iin),12),5,2))
+    )) AS BIRTHDATE_BUYER,
+
+    Floor((Today(1) - MakeDate(
+        If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'1','2'), 1800,
+            If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'3','4'), 1900,
+                If(Match(Mid(Right('000000000000' & Text(iin),12),7,1),'5','6'), 2000,
+                    If(Num(Left(Right('000000000000' & Text(iin),12),2)) <= Mod(Year(Today(1)),100), 2000, 1900)
+                )
+            )
+        ) + Num(Left(Right('000000000000' & Text(iin),12),2)),
+        Num(Mid(Right('000000000000' & Text(iin),12),3,2)),
+        Num(Mid(Right('000000000000' & Text(iin),12),5,2))
+    )) / 365.25) AS AGE_BUYER,
+
+    // --- Остальные поля ---
+    Date(orderdate) AS ORDERDATE, 
+    Timestamp(createdts) AS ORDERTIMESTAMP,
+    orderstatus AS ORDERSTATUS,
+    ordercode AS ORDERCODE,
+    sku AS PRODUCT_SKU,
+    product AS PRODUCT_NAME,
+    quantity AS QUANTITY,
+    baseprice AS PRODUCT_PRICE,
+    totalprice AS PAYED_PRICE,
+//     If(parent_category = 'Одежда',
+//         Trim(Replace(Replace(Replace(Replace(Replace(Replace(Replace(product, 
+//             '2XL', ''), 'XXL', ''), 'XL', ''), 'XS', ''), 'S', ''), 'M', ''), 'L', '')),
+//         ApplyMap('Map_NewProduct', sku, product) 
+//     ) AS NEW_PRODUCT_NAME,
+    If(baseprice = 0 OR IsNull(baseprice), 'Нет цены', 
+        If(baseprice <= 5000, 'До 5000', 
+            If(baseprice < 10000, '5000 - 10000', 
+                If(baseprice < 20000, '10000 - 20000', 'от 20000')
+            )
+        )
+    ) AS PRICE_SEGMENT,
+    DATE(FLOOR(DT_CREATE)) AS PRODUCT_CREATE,
+    FINAL_MONTH_DIVISOR,
+    CITYFR as CITY_FROM, 
+    CITYTO AS CITY_TO,
+    ApplyMap('City_Region_Mapping', CITYTO, 'Неизвестно') AS REGION_TO,
+    p_cancellationreason as CANCELREASON_CODE,
+    If(WildMatch(Upper([product]), '*ХУДИ*','*СВИТШОТ*','*ТОЛСТОВКА*'), 'Худи / Свитшот / Толстовка',
+If(WildMatch(Upper([product]), '*ФУТБОЛКА*'), 'Футболка',
+If(WildMatch(Upper([product]), '*ПОЛО*'), 'Поло',
+If(WildMatch(Upper([product]), '*ВЕТРОВК*'), 'Ветровка',
+If(WildMatch(Upper([product]), '*БОМБЕР*'), 'Бомбер',
+If(WildMatch(Upper([product]), '*ЖИЛЕТ*'), 'Жилет',
+If(WildMatch(Upper([product]), '*ФЛИС*'), 'Флиска',
+If(WildMatch(Upper([product]), '*ШАПКА*'), 'Шапка',
+If(WildMatch(Upper([product]), '*КЕПКА*'), 'Кепка',
+If(WildMatch(Upper([product]), '*ТЕРМОКРУЖК*','*КРУЖКА*','*СТАКАН*'), 'Термокружка / Кружка',
+If(WildMatch(Upper([product]), '*ТЕРМОБУТЫЛК*','*БУТЫЛК*'), 'Бутылка / Термобутылка',
+If(WildMatch(Upper([product]), '*ТЕРМОС*'), 'Термос',
+If(WildMatch(Upper([product]), '*РЮКЗАК*'), 'Рюкзак',
+If(WildMatch(Upper([product]), '*ШОППЕР*'), 'Шоппер',
+If(WildMatch(Upper([product]), '*ТОУТ*'), 'Сумка-тоут',
+If(WildMatch(Upper([product]), '*СУМКА ПОЯСНАЯ*','*ПОЯСНАЯ*'), 'Поясная сумка',
+If(WildMatch(Upper([product]), '*НЕСЕССЕР*'), 'Несессер',
+If(WildMatch(Upper([product]), '*ЧЕМОДАН*'), 'Чемодан',
+If(WildMatch(Upper([product]), '*СУМК*'), 'Сумка',
+If(WildMatch(Upper([product]), '*ПЛЕД*'), 'Плед',
+If(WildMatch(Upper([product]), '*ЗОНТ*'), 'Зонт',
+If(WildMatch(Upper([product]), '*АККУМУЛЯТОР*','*POWERBANK*'), 'Пауэрбанк',
+If(WildMatch(Upper([product]), '*КОЛОНК*'), 'Колонка',
+If(WildMatch(Upper([product]), '*ЛАНЧ*'), 'Ланч-бокс',
+If(WildMatch(Upper([product]), '*СВЕТИЛЬНИК*'), 'Светильник',
+If(WildMatch(Upper([product]), '*ПОДАРОЧНЫЙ БОКС*'), 'Подарочный бокс',
+'Прочее')))))))))))))))))))))))))) as [Категория товара],
+P_ORDER_NUM
+
+RESIDENT TEMP_SQL_DATA;
+DROP TABLE TEMP_SQL_DATA;
+
+
+Left Join (ORDERS)
+LOAD CANCELREASON_CODE, CANCELLATIONREASON_NAME;
+select
+       itempk AS CANCELREASON_CODE,
+       lower(t2.P_NAME) CANCELLATIONREASON_NAME
+from S43.ENUMERATIONVALUESLP t2
+where t2.langpk = 8796093317152 and t2.itemtypepk = 8796111011922;
+
+
+LEFT JOIN (ORDERS)
+LOAD
+    order_code as ORDERCODE,
+    product_code as PRODUCT_SKU,
+    rating as USER_RATING,
+    comment as USER_COMMENT;
+SQL
+SELECT order_code, product_code, rating, comment FROM BI_VIEW.S0043_SHOP_CUSTOMER_REVIEW_JSON
+WHERE merchant_uid = 'Uconstore'
+GROUP BY 1,2,3,4;
+
+left join (ORDERS)
+load *;
+sql
+WITH emp_pos as 
+(SELECT
+	t1.ID,
+	FIO AS BUYER_FIO, 
+    POSITION, 
+    HIRING_DATE, 
+    row_number() over(partition by FIO order by HIRING_DATE DESC) as rn 
+FROM (SELECT 
+	CONCAT_WS(' ', `LAST_NAME`, `FIRST_NAME`,IF(TRIM(`MIDDLE_NAME`) = '' OR ISNULL(`MIDDLE_NAME`), NULL, `MIDDLE_NAME`)) FIO,
+    POSITION,
+    HIRING_DATE,
+    up.ID
+FROM S0008.EMPLOYEES es LEFT JOIN (SELECT ID, POSITION FROM S0008.USERS_POSITIONS) up ON up.ID = es.POSITION_ID) t1)
+SELECT 
+	DISTINCT BUYER_FIO, 
+	POSITION, 
+	ID 
+from emp_pos WHERE rn = 1;
+
+Left Join (ORDERS)
+LOAD *;
+SQL 
+SELECT 
+	code AS ORDERCODE, 
+	CASE WHEN latest_status = 'paymentConfirmed' THEN 'acceptedByHub' ELSE latest_status END AS current_status_status 
+FROM 
+	( SELECT 
+		code, 
+		max_by(current_status_status, ACTUALTIME) AS latest_status 
+	  FROM BI_VIEW.S0043_ORDERS WHERE merchant_id = 'Uconstore' 
+	  GROUP BY code) grouped_orders;
+
+LEFT JOIN (ORDERS)
+LOAD
+    ID,
+    Класс as category
+FROM [lib://AttachedFiles/Position ID CATEGORY.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+
+
+
+LEFT JOIN (ORDERS)
+LOAD
+    "Номер заказа" AS ORDERCODE,
+    "Индивидуальный номер товара" AS PRODUCT_SKU,
+    "Классификация обратной связи" AS RETURN_REASON
+FROM [lib://AttachedFiles/Возвраты отработка.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+LEFT JOIN (ORDERS)
+LOAD *;
+SQL
+SELECT 
+	sku as PRODUCT_SKU, 
+    category as CATEGORY, 
+    parent_category as PARENT_CATEGORY,
+    CONCAT(parent_category,'/',category_2lvl) as category_3lvl
+    
+from BI.stock_merch_v 
+WHERE merch_code = 'Uconstore';
+
+ORDERS_FINAL:
+LOAD
+BUYER_IIN,
+IIN_STR,
+BUYER_FIO,
+BUYER_GENDER,
+BIRTHDATE_BUYER,
+AGE_BUYER,
+ORDERDATE,
+ORDERTIMESTAMP,
+ORDERSTATUS,
+ORDERCODE,
+PRODUCT_SKU,
+PRODUCT_NAME,
+CATEGORY,
+PARENT_CATEGORY,
+    If(PARENT_CATEGORY = 'Одежда',
+        Trim(Replace(Replace(Replace(Replace(Replace(Replace(Replace(PRODUCT_NAME, 
+            '2XL', ''), 'XXL', ''), 'XL', ''), 'XS', ''), 'S', ''), 'M', ''), 'L', '')),
+        ApplyMap('Map_NewProduct', PRODUCT_SKU, PRODUCT_NAME) 
+    ) AS NEW_PRODUCT_NAME,
+QUANTITY,
+PRODUCT_PRICE,
+PAYED_PRICE,
+PRICE_SEGMENT,
+PRODUCT_CREATE,
+FINAL_MONTH_DIVISOR,
+CITY_FROM,
+CITY_TO,
+REGION_TO,
+CANCELLATIONREASON_NAME,
+RETURN_REASON,
+[Категория товара],
+P_ORDER_NUM,
+USER_RATING,
+USER_COMMENT,
+POSITION,
+category,
+current_status_status,
+AutoNumber(category_3lvl & '|' & PRODUCT_PRICE) as PriceKey,
+category_3lvl & '|' & PRODUCT_CREATE AS VIEW_KEY,
+category_3lvl
+
+RESIDENT ORDERS
+where ORDERDATE > $(V_MINDATE_N);
+DROP TABLE ORDERS;
+
+TEMP_PRICE_CHANGE:
+LOAD 
+    NEW_PRODUCT_NAME, 
+    PRODUCT_PRICE as UniqProductPrice,
+    CATEGORY,
+    DATE(MIN(ORDERDATE)) as MinDate, 
+    DATE(MAX(ORDERDATE)) as MaxDate,
+    AutoNumber(CATEGORY & '|' & PRODUCT_PRICE) as PriceKey,
+    MAX(ORDERDATE) - MIN(ORDERDATE) AS period
+Resident ORDERS_FINAL
+GROUP BY 
+    NEW_PRODUCT_NAME, 
+    PRODUCT_PRICE,
+    CATEGORY;
+
+MAP_START_DATES:
+MAPPING LOAD 
+    NEW_PRODUCT_NAME & '|' & CATEGORY, 
+    MIN(MinDate) 
+Resident TEMP_PRICE_CHANGE 
+GROUP BY NEW_PRODUCT_NAME, CATEGORY;
+
+MAP_MIN_PRICES:
+MAPPING LOAD 
+    NEW_PRODUCT_NAME & '|' & CATEGORY, 
+    MIN(UniqProductPrice) 
+Resident TEMP_PRICE_CHANGE 
+GROUP BY NEW_PRODUCT_NAME, CATEGORY;
+
+MAP_SECOND_MIN_PRICES:
+MAPPING LOAD 
+    NEW_PRODUCT_NAME & '|' & CATEGORY, 
+    FirstSortedValue(UniqProductPrice, UniqProductPrice, 2) // Берем 2-е значение в сортировке цен
+Resident TEMP_PRICE_CHANGE
+GROUP BY NEW_PRODUCT_NAME, CATEGORY;
+
+
+PRICE_CHANGE:
+LOAD
+    *,
+    IF(MinDate = ApplyMap('MAP_START_DATES', NEW_PRODUCT_NAME & '|' & CATEGORY) AND period <= 1, 
+        'Стартовая цена',
+        IF(Year(MinDate) > 2024 and period < 21  AND 
+           (UniqProductPrice = ApplyMap('MAP_MIN_PRICES', NEW_PRODUCT_NAME & '|' & CATEGORY)),
+            'Акционная цена',
+            
+            // ПРИОРИТЕТ 3: Минимальная цена (если держалась долго, >= 21 дня)
+            IF(UniqProductPrice = ApplyMap('MAP_MIN_PRICES', NEW_PRODUCT_NAME & '|' & CATEGORY), 
+                'Минимальная цена',
+                
+                'Стандартная цена'
+            )
+        )
+    ) as PriceCategory
+Resident TEMP_PRICE_CHANGE;
+DROP TABLE TEMP_PRICE_CHANGE;
+
+
+// Temporary Calendar
+TempCalendar:
+LOAD 
+     DATE($(V_MINDATE_N) + rowno() - 1) AS TempDate
+AUTOGENERATE 1
+While $(V_MINDATE_N)+IterNo() <= $(V_MAXDATE);
+
+ORDERDATE_CALENDAR:
+Load
+	Date(TempDate,'DD.MM.YYYY') as ORDERDATE,
+    Year(TempDate) as ORDER_YEAR,
+    Month(TempDate) as ORDER_MONTH,
+    Day(TempDate) as ORDER_DAY,
+    MonthName(TempDate) as ORDER_MONTHYEAR,
+    WeekDay(TempDate) as ORDER_WEEKDAY,
+    Date(WeekStart(TempDate),'YYYY.MM.DD')&'-'&Date(WeekEnd(TempDate),'YYYY.MM.DD') as ORDER_WEEK
+RESIDENT TempCalendar
+ORDER BY TempDate ASC;
+
+drop table TempCalendar;
+
+CLICKDATA:
+LOAD
+MonthName(dt) as DATE_CLICK,
+uniq_users,
+new_users,
+add_cart_users,
+add_cartcta_users,
+buy_now_click_users,
+transaction_users
+;
+SQL
+WITH t1 as (SELECT 
+	DATE_TRUNC('month', approximatearrivaltimestamp) AS dt, 
+	count(distinct user_id_hash) AS uniq_users, 
+	COUNT(CASE WHEN new_users = 1 THEN 1 END) as new_users
+FROM
+(SELECT approximatearrivaltimestamp, user_id_hash, ROW_NUMBER() OVER(PARTITION BY user_id_hash ORDER BY approximatearrivaltimestamp) as new_users
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_teaser_click'
+and brand= 'Kaspi') a
+GROUP BY 1),
+t2 as (SELECT DATE_TRUNC('month', approximatearrivaltimestamp) AS dt, count(distinct user_id_hash) AS add_cart_users
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_add_to_cart_click'
+and brand= 'Kaspi'
+GROUP BY 1),
+t3 as (SELECT DATE_TRUNC('month', approximatearrivaltimestamp) AS dt, count(distinct user_id_hash) AS add_cartcta_users
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_cta_click'
+and brand= 'Kaspi'
+GROUP BY 1),
+t6 as (SELECT DATE_TRUNC('month', approximatearrivaltimestamp) AS dt, count(distinct user_id_hash) AS buy_now_click_users
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_buy_now_click'
+and brand= 'Kaspi'
+GROUP BY 1),
+t7 as (SELECT DATE_TRUNC('month', approximatearrivaltimestamp) AS dt, count(distinct user_id_hash) AS transaction_users
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_transaction'
+and brand= 'Kaspi'
+GROUP BY 1)
+SELECT t1.dt, uniq_users, new_users, add_cart_users, add_cartcta_users, buy_now_click_users ,transaction_users
+FROM t1 
+LEFT JOIN t2 ON t1.dt = t2.dt 
+LEFT JOIN t3 ON t1.dt = t3.dt 
+LEFT JOIN t6 ON t1.dt = t6.dt
+LEFT JOIN t7 ON t1.dt = t7.dt;
+
+Temp_Orders:
+LOAD 
+    MonthName(ORDERDATE) AS DATE_CLICK, 
+    Count(DISTINCT If(PAYED_PRICE > 0 AND Match(current_status_status, 'completed', 'acceptedByHub', 'uploadedToPostomat', 'receivedByHub'), ORDERCODE, NULL())) AS TotalOrders,
+    Sum(If(PAYED_PRICE > 0 AND Match(current_status_status, 'completed', 'acceptedByHub', 'uploadedToPostomat', 'receivedByHub'), QUANTITY, 0)) AS TOTAL_QUANTITY
+RESIDENT ORDERS_FINAL 
+GROUP BY MonthName(ORDERDATE);
+
+// 2. Присоединяем к основной таблице
+LEFT JOIN (CLICKDATA)
+LOAD 
+    DATE_CLICK,
+    TotalOrders,
+    TOTAL_QUANTITY
+RESIDENT Temp_Orders;
+;
+DROP TABLE Temp_Orders;
+
+
+[PRODUCT_CLICK]:
+Load
+   MonthName(dt) as DATE_CLICK,
+   product_id as product_id_view,
+   product_name as product_name_view,
+   VIEW_KEY,
+   click_cnt as PRODUCT_CLICK_ACTIONS
+;
+SQL
+WITH t1 AS(select 
+  category_id, 
+  created_time, 
+  product_id,
+  product_name,
+  date_trunc('month', approximatearrivaltimestamp) AS dt,
+  count(distinct user_id_hash) click_cnt
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_teaser_click'
+and brand= 'Kaspi'
+and created_time is not null
+and price is not null
+group by 1,2,3,4,5)
+SELECT 
+	dt, 
+  	product_id,
+  	product_name, 
+  	CONCAT(a.category_level_2,'|',DATE_FORMAT(t1.created_time, '%d.%m.%Y')) as VIEW_KEY,
+  	click_cnt
+FROM t1 left join  
+(SELECT category_id, category_level_2 
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_teaser_click'
+and brand= 'Kaspi'
+and created_time is not null
+and price is not null
+and`up#selected_language` in ('ru-RU')
+group by 1,2) a ON t1.category_id = a.category_id
+WHERE a.category_level_2 NOT REGEXP '[ӘҒҚҢӨҰҮҺІәғқңөұүһі]'
+;
+
+
+
+[PRODUCT_CLICK_2]:
+Load
+   MonthName(dt) as DATE_CLICK_2,
+   category_level_2 as category_3lvl,
+   click_cnt as CATEGORY_CLICK_ACTIONS
+;
+SQL
+WITH t1 AS(select 
+  category_id, 
+  created_time,
+  date_trunc('month', approximatearrivaltimestamp) AS dt,
+  count(distinct user_id_hash) click_cnt
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_teaser_click'
+and brand= 'Kaspi'
+and created_time is not null
+and price is not null
+group by 1,2,3)
+SELECT 
+	dt, 
+  	a.category_level_2,
+  	click_cnt
+FROM t1 left join  
+(SELECT category_id, category_level_2 
+from S0173.AWS_EVENTS_N 
+where approximatearrivaltimestamp >= '2024-09-01'
+and event_name='shop_product_teaser_click'
+and brand= 'Kaspi'
+and created_time is not null
+and price is not null
+and`up#selected_language` in ('ru-RU')
+group by 1,2) a ON t1.category_id = a.category_id
+WHERE a.category_level_2 NOT REGEXP '[ӘҒҚҢӨҰҮҺІәғқңөұүһі]';
+
+
+LOAD
+    Товар,
+    "Наимнование в магазине",
+    SKU as PRODUCT_SKU,
+    "Мужские/Женские",
+    Наименование,
+    "Детальное описание товара",
+    "ОСТАТКИ на складах"
+FROM [lib://Kaspi_service_infrastructura/Каспи магазин.xlsx]
+(ooxml, embedded labels, table is [Товары в магазине]);
+
+
+
+

@@ -1,0 +1,1041 @@
+LIB CONNECT TO 'staroks (BKS)';
+
+LOAD
+    F00_record_type    AS [F00 Тип записи],
+    F01_id             AS [F01 ID],
+    F02_id_doctype     AS [F02 ID типа документа],
+    F03_doctype_name   AS [F03 Тип заявки],
+    F04_display_upper  AS [F04 Подтип заявки],
+    F05_sub_type       AS [F05 Вид операции],
+    F06_department     AS [F06 Департамент],
+    F07_product_group  AS [F07 Группа продукта],
+    F08_partner_name   AS [F08 Партнер],
+    F09_bin_iin        AS [F09 БИН/ИИН],
+    F10_account_iik    AS [F10 ИИК],
+    F11_crm_request_id AS [F11 CRM ID],
+    F12_contract_number AS [F12 Номер договора],
+    F13_description    AS [F13 Описание],
+    F14_amount         AS [F14 Сумма],
+    F15_doc_number     AS [F15 Номер документа],
+    F16_product        AS [F16 Продукт],
+    F17_display_name   AS [F17 Наименование],
+    F18_createdate     AS [F18 Дата создания],
+    F19_request_date   AS [F19 Дата заявки],
+    F20_state          AS [F20 Статус],
+    F21_author_name    AS [F21 Автор],
+    F22_department_name AS [F22 Отдел],
+    F23_quantity       AS [F23 Количество],
+    F_Year             AS [Год создания],
+    Month(MakeDate(2026, F_Month, 1))		   AS [Месяц создания],
+    F_StatusBucket     AS [Статус заявки],
+    F24_ibso_active    AS [F24 Активные ИБСО],
+    F25_rbo_active     AS [F25 Активные РБО],
+    F27_total_active   AS [F27 Всего активных],
+    F28_total_closed   AS [F28 Всего закрытых]
+;
+
+SQL SELECT
+    -- ═══════════════════════════════════════════════════
+    -- ИСТОЧНИК 1: MOTIV (S0108.DOCUMENTS) → Обращение
+    -- ═══════════════════════════════════════════════════
+    'Обращение'                                            AS F00_record_type,
+    d.id                   AS F01_id,
+    d.id_doctype           AS F02_id_doctype,
+    dt.name                AS F03_doctype_name,
+    d.display_upper_name   AS F04_display_upper,
+
+    CASE
+        WHEN d.id_doctype = 894  THEN d.field1
+        WHEN d.id_doctype = 1174 THEN d.field2
+        WHEN d.id_doctype = 1310 THEN d.field6
+        WHEN d.id_doctype = 1318 THEN d.field5
+        WHEN d.id_doctype = 1312 THEN d.field5
+        WHEN d.id_doctype = 931  THEN d.field1
+        WHEN d.id_doctype = 658  THEN d.field2
+        WHEN d.id_doctype = 947  THEN d.field1
+        ELSE NULL
+    END AS F05_sub_type,
+
+    CASE
+        WHEN d.id_doctype IN (1105, 641, 868, 799, 439, 1166, 1178, 1169, 658)
+            THEN 'Управление развития платежей kaspi.kz'
+        WHEN d.id_doctype = 1174 THEN 'ДСР'
+        WHEN d.id_doctype = 931  THEN 'Debt Collection Business'
+        WHEN d.id_doctype = 947  THEN 'Управление Разрешения Спорных ситуаций'
+        WHEN d.id_doctype = 1107 THEN 'Департамент экономической безопасности'
+        WHEN d.id_doctype = 38 AND d.field2 LIKE '%Управление Kaspi Shop Product Office%' THEN 'Управление Kaspi Shop Product Office'
+        WHEN d.id_doctype = 38 AND d.field2 LIKE '%Управление Анализа и Улучшений Процессов%' THEN 'Управление Анализа и Улучшений Процессов'
+        ELSE 'Департамент Поддержки Партнеров'
+    END AS F06_department,
+
+    CASE
+        WHEN d.id_doctype IN (1105, 641, 868, 799, 439, 1166, 1178, 1169, 658)
+            THEN 'Платежи kaspi.kz'
+        WHEN d.id_doctype IN (1195, 1200, 1201, 1193, 1393, 1391, 1394, 1198, 1312, 1174)
+            THEN 'Единые взаиморасчеты'
+        WHEN d.id_doctype = 894 AND d.field1 = 'ЧБК' THEN 'Единые взаиморасчеты'
+        WHEN d.id_doctype = 931 AND d.field1 IN ('Выписки', 'Запросы по платежкам') AND d.field7 = 'ЮЛ'
+            THEN 'Единые взаиморасчеты'
+        WHEN d.id_doctype = 1107 THEN 'Единые взаиморасчеты'
+        WHEN d.id_doctype = 38 AND (d.field2 LIKE '%Управление Kaspi Shop Product Office%' OR d.field2 LIKE '%Управление Анализа и Улучшений Процессов%') THEN 'Единые взаиморасчеты'
+        WHEN d.id_doctype IN (1318, 1310) THEN 'Кредиты'
+        WHEN d.id_doctype = 894 AND d.field1 IN ('Закрытие кредитной линии', 'Отмена закупа в рассрочку')
+            THEN 'Кредиты'
+        WHEN d.id_doctype = 931 AND d.field1 IN (
+            'Урегулирование гос. пошлины', 'Корректировка задолженности по РС',
+            'Оплата Исполнительной Надписи', 'Урегулирование исполнительной надписи',
+            'Возврат ошибочно исполненного ПТ') AND d.field7 = 'ЮЛ'
+            THEN 'Кредиты'
+        WHEN d.id_doctype = 947 THEN 'Кредиты'
+        WHEN d.id_doctype = 1199 THEN 'Карты Бизнес'
+        WHEN d.id_doctype = 894 AND d.field1 = 'Закрытие Карты Бизнес' THEN 'Карты Бизнес'
+        WHEN d.id_doctype IN (1196, 1392) THEN 'Счета'
+        ELSE NULL
+    END AS F07_product_group,
+
+    CASE
+        WHEN d.id_doctype IN (1105, 641, 868, 439, 1166, 1178, 1169) THEN d.field1
+        WHEN d.id_doctype = 894  THEN d.field3
+        WHEN d.id_doctype = 1174 THEN d.field1
+        WHEN d.id_doctype IN (1195, 1196, 1199) THEN d.field2
+        WHEN d.id_doctype = 1200  THEN d.field3
+        WHEN d.id_doctype = 1201  THEN d.field4
+        WHEN d.id_doctype IN (1393, 1391, 1394, 1392) THEN d.field1
+        WHEN d.id_doctype IN (1310, 1198, 1312, 1318) THEN d.field3
+        WHEN d.id_doctype = 931  THEN d.field3
+        WHEN d.id_doctype = 658  THEN d.field1
+        WHEN d.id_doctype = 947  THEN d.field3
+        WHEN d.id_doctype = 1107 THEN d.field1
+        ELSE NULL
+    END AS F08_partner_name,
+
+    CASE
+        WHEN d.id_doctype IN (1105, 868, 1178, 1169) THEN d.field2
+        WHEN d.id_doctype = 894  THEN d.field2
+        WHEN d.id_doctype = 1174 THEN d.field3
+        WHEN d.id_doctype IN (1195, 1391, 1394, 1392) THEN d.field4
+        WHEN d.id_doctype = 1200  THEN d.field5
+        WHEN d.id_doctype = 1201  THEN d.field6
+        WHEN d.id_doctype = 1199  THEN d.field3
+        WHEN d.id_doctype = 1393  THEN d.field3
+        WHEN d.id_doctype = 1196  THEN d.field4
+        WHEN d.id_doctype = 1193  THEN d.field1
+        WHEN d.id_doctype = 1166  THEN d.field4
+        WHEN d.id_doctype IN (1310, 1318) THEN d.field3
+        WHEN d.id_doctype IN (1198, 1312) THEN d.field4
+        WHEN d.id_doctype = 931  THEN d.field2
+        WHEN d.id_doctype = 947  THEN d.field2
+        WHEN d.id_doctype = 1107 THEN d.field2
+        ELSE NULL
+    END AS F09_bin_iin,
+
+    CASE
+        WHEN d.id_doctype = 1105  THEN d.field5
+        WHEN d.id_doctype = 1166  THEN d.field2
+        WHEN d.id_doctype IN (1195, 1196, 1391, 1394, 1392) THEN d.field3
+        WHEN d.id_doctype = 1200  THEN d.field4
+        WHEN d.id_doctype = 1201  THEN d.field5
+        WHEN d.id_doctype = 947   THEN d.field4
+        WHEN d.id_doctype = 1199  THEN d.field4
+        WHEN d.id_doctype = 1393  THEN d.field4
+        WHEN d.id_doctype = 1198  THEN d.field6
+        WHEN d.id_doctype = 1107  THEN d.field6
+        ELSE NULL
+    END AS F10_account_iik,
+
+    CASE
+        WHEN d.id_doctype IN (1310, 1198, 1312, 1318) THEN d.field1
+        ELSE NULL
+    END AS F11_crm_request_id,
+
+    CASE
+        WHEN d.id_doctype IN (1310, 1198) THEN d.field5
+        ELSE NULL
+    END AS F12_contract_number,
+
+    CASE
+        WHEN d.id_doctype = 894  THEN d.field5
+        WHEN d.id_doctype = 1174 THEN d.field4
+        WHEN d.id_doctype = 868  THEN d.field3
+        WHEN d.id_doctype = 1178 THEN d.field5
+        WHEN d.id_doctype IN (1195, 1196, 1393) THEN d.field5
+        WHEN d.id_doctype = 1200  THEN d.field6
+        WHEN d.id_doctype = 1201  THEN d.field7
+        WHEN d.id_doctype = 1193  THEN d.field4
+        WHEN d.id_doctype = 799   THEN d.field6
+        WHEN d.id_doctype = 931   THEN d.field4
+        WHEN d.id_doctype = 658   THEN d.field3
+        WHEN d.id_doctype = 947   THEN d.field5
+        WHEN d.id_doctype = 1107  THEN d.field4
+        ELSE NULL
+    END AS F13_description,
+
+    CASE
+        WHEN d.id_doctype = 1105  THEN d.field6
+        WHEN d.id_doctype = 1178  THEN d.field4
+        WHEN d.id_doctype = 1200  THEN d.field2
+        WHEN d.id_doctype = 1201  THEN COALESCE(NULLIF(d.field2, '0'), d.field3)
+        WHEN d.id_doctype = 1394  THEN d.field5
+        WHEN d.id_doctype = 1392  THEN d.field5
+        WHEN d.id_doctype = 1193  THEN d.field5
+        WHEN d.id_doctype = 658   THEN d.field6
+        ELSE NULL
+    END AS F14_amount,
+
+    CASE
+        WHEN d.id_doctype = 894  THEN d.field6
+        WHEN d.id_doctype = 1174 THEN d.field6
+        WHEN d.id_doctype = 868  THEN d.field5
+        WHEN d.id_doctype = 1178 THEN d.field6
+        WHEN d.id_doctype = 1193 THEN d.field6
+        WHEN d.id_doctype = 931  THEN d.field5
+        WHEN d.id_doctype = 1107 THEN d.field5
+        ELSE NULL
+    END AS F15_doc_number,
+
+    CASE
+        WHEN d.id_doctype IN (1312, 1318) THEN d.field6
+        WHEN d.id_doctype = 947  THEN d.field4
+        ELSE NULL
+    END AS F16_product,
+
+    d.display_name        AS F17_display_name,
+    d.createdate          AS F18_createdate,
+
+    CASE
+        WHEN d.id_doctype IN (1310, 1198, 1312, 1318) THEN d.field2
+        ELSE NULL
+    END AS F19_request_date,
+
+    d.state               AS F20_state,
+    e.name                AS F21_author_name,
+    dep.name              AS F22_department_name,
+
+    CASE
+        WHEN d.id_doctype = 931  THEN d.field8
+        WHEN d.id_doctype = 1107 THEN d.field5
+        ELSE NULL
+    END AS F23_quantity,
+
+    YEAR(d.createdate)    AS F_Year,
+    MONTH(d.createdate)   AS F_Month,
+
+    CASE
+        WHEN d.state = 4                          THEN 'Закрыта'
+        WHEN d.state = 0 AND d.isrejected = 0      THEN 'В работе'
+        WHEN d.state = 0 AND d.isrejected IN (1,2) THEN 'Отклонена'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+
+    NULL AS F24_ibso_active,
+    NULL AS F25_rbo_active,
+    NULL AS F27_total_active,
+    NULL AS F28_total_closed
+
+FROM S0108.DOCUMENTS d
+LEFT JOIN S0108.DOCTYPES dt  ON d.id_doctype = dt.id
+LEFT JOIN S0108.EMPLOYER e    ON d.id_author = e.id
+LEFT JOIN S0108.DEPARTMENT dep ON d.id_department = dep.id
+LEFT JOIN (
+    SELECT x.id_document, x.last_action_name, x.last_action_employer
+    FROM (
+        SELECT rt.id_document,
+               a.name AS last_action_name,
+               a.id_employer AS last_action_employer,
+               ROW_NUMBER() OVER (PARTITION BY rt.id_document ORDER BY a.adate DESC, a.id DESC) AS rn
+        FROM S0108.ROUTETREES rt
+        JOIN S0108.ACTIONS a ON a.id_task = rt.id_task
+    ) x
+    WHERE x.rn = 1
+) la ON la.id_document = d.id
+
+WHERE d.isdeleted = 0
+  AND (
+      d.id_doctype IN (1105, 641, 868, 799, 439, 1166, 1178, 1169, 658)
+      OR d.id_doctype IN (1195, 1200, 1201, 1193, 1393, 1391, 1394, 1199, 1196, 1392)
+      OR (d.id_doctype = 894 AND d.field1 IN ('ЧБК', 'Закрытие кредитной линии', 'Закрытие Карты Бизнес', 'Отмена закупа в рассрочку'))
+      OR (d.id_doctype = 1174 AND d.field2 IN ('Исполнение судебных документов', 'Выписки', 'Платежки'))
+      OR (d.id_doctype = 1310 AND d.field6 IN ('Прощение долга', 'Приостановить начисление вознаграждения, неустойки'))
+      OR d.id_doctype IN (1198, 1312, 1318, 947, 1107)
+      OR (d.id_doctype = 931 AND d.field7 = 'ЮЛ' AND d.field1 IN (
+          'Урегулирование гос. пошлины', 'Корректировка задолженности по РС',
+          'Оплата Исполнительной Надписи', 'Урегулирование исполнительной надписи',
+          'Возврат ошибочно исполненного ПТ', 'Выписки', 'Запросы по платежкам'))
+      OR (d.id_doctype = 38 AND (d.field2 LIKE '%Управление Kaspi Shop Product Office%' OR d.field2 LIKE '%Управление Анализа и Улучшений Процессов%'))
+  )
+  -- Исключаем заявки, которые не дошли до нас и не рассматривались:
+  -- либо автор сам закрыл/заархивировал заявку, либо согласующий вернул её на доработку без дальнейшего прогресса
+  AND NOT (
+      d.state = 4 AND d.isrejected = 0
+      AND (
+          la.last_action_employer = d.id_author
+          OR (la.last_action_name LIKE '%доработ%' AND la.last_action_employer <> d.id_author)
+      )
+  )
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 2: Шаблон СПБ (группа 2172) — SIEBEL → Обращение
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                            AS F00_record_type,
+    get_json_string(spb.kafka_data, '$.id')               AS F01_id,
+    get_json_string(tt.AFTER_BODY, '$.id')                 AS F02_id_doctype,
+    get_json_string(tt.AFTER_BODY, '$.template_name')      AS F03_doctype_name,
+    get_json_string(spb.kafka_data, '$.name')              AS F04_display_upper,
+    get_json_string(tt.AFTER_BODY, '$.template_name')      AS F05_sub_type,
+    'Департамент Поддержки Партнеров'                       AS F06_department,
+    CASE
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '15'    THEN 'Переводы'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '16'    THEN 'Единые взаиморасчеты'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '1107'  THEN 'Единые взаиморасчеты'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '1108'  THEN 'Счета'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '1109' THEN 'Единые взаиморасчеты'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '1110' THEN 'Кредиты'
+        WHEN get_json_string(tt.AFTER_BODY, '$.id') = '1111' THEN 'Единые взаиморасчеты'
+        ELSE NULL
+    END AS F07_product_group,
+    NULL                                                    AS F08_partner_name,
+    NULL                                                    AS F09_bin_iin,
+    NULL                                                    AS F10_account_iik,
+    get_json_string(spb.kafka_data, '$.sr_number')          AS F11_crm_request_id,
+    NULL                                                    AS F12_contract_number,
+    get_json_string(spb.kafka_data, '$.description')         AS F13_description,
+    NULL                                                    AS F14_amount,
+    NULL                                                    AS F15_doc_number,
+    NULL                                                    AS F16_product,
+    NULL                                                    AS F17_display_name,
+    FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000) AS F18_createdate,
+    NULL                                                    AS F19_request_date,
+    get_json_string(spb.kafka_data, '$.status')             AS F20_state,
+    get_json_string(spb.kafka_data, '$.created_by')         AS F21_author_name,
+    get_json_string(spb.kafka_data, '$.name')               AS F22_department_name,
+    NULL                                                    AS F23_quantity,
+    YEAR(FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000))  AS F_Year,
+    MONTH(FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000)) AS F_Month,
+    CASE
+        WHEN get_json_string(spb.kafka_data, '$.status') = 'Готово'         THEN 'Закрыта'
+        WHEN get_json_string(spb.kafka_data, '$.status') IN ('В работе','Передано в СПБ') THEN 'В работе'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+    NULL AS F24_ibso_active,
+    NULL AS F25_rbo_active,
+    NULL AS F27_total_active,
+    NULL AS F28_total_closed
+FROM S0259.SPB_MAIN spb
+JOIN S0015.SPB_SPB_ADDITIONAL_INFO ai
+    ON CAST(get_json_string(ai.AFTER_BODY, '$.id') AS BIGINT) = spb.ID
+JOIN S0015.SPB_SPB_TEXT_TEMPLATE tt
+    ON CAST(get_json_string(ai.AFTER_BODY, '$.template_id') AS BIGINT) = tt.ID
+WHERE spb.op != 'd'
+  AND ai.OP != 'd'
+  AND tt.OP != 'd'
+  AND get_json_string(tt.AFTER_BODY, '$.spb_group_id') = '2172'
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 3: Запросы АФР — Департамент Качества → Обращение
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                            AS F00_record_type,
+    get_json_string(spb.kafka_data, '$.id')               AS F01_id,
+    NULL                                                    AS F02_id_doctype,
+    'Запросы АФР'                                          AS F03_doctype_name,
+    get_json_string(spb.kafka_data, '$.name')              AS F04_display_upper,
+    get_json_string(spb.kafka_data, '$.category_name')     AS F05_sub_type,
+    'Департамент Качества (ЗАПРОСЫ АФР)'                   AS F06_department,
+    'Кредиты'                                              AS F07_product_group,
+    NULL                                                    AS F08_partner_name,
+    NULL                                                    AS F09_bin_iin,
+    NULL                                                    AS F10_account_iik,
+    get_json_string(spb.kafka_data, '$.sr_number')          AS F11_crm_request_id,
+    NULL                                                    AS F12_contract_number,
+    get_json_string(spb.kafka_data, '$.description')        AS F13_description,
+    NULL                                                    AS F14_amount,
+    NULL                                                    AS F15_doc_number,
+    NULL                                                    AS F16_product,
+    NULL                                                    AS F17_display_name,
+    FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000) AS F18_createdate,
+    NULL                                                    AS F19_request_date,
+    get_json_string(spb.kafka_data, '$.status')            AS F20_state,
+    get_json_string(spb.kafka_data, '$.created_by')         AS F21_author_name,
+    get_json_string(spb.kafka_data, '$.name')               AS F22_department_name,
+    NULL                                                    AS F23_quantity,
+    YEAR(FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000))  AS F_Year,
+    MONTH(FROM_UNIXTIME(CAST(get_json_string(spb.kafka_data, '$.created') AS BIGINT) / 1000000)) AS F_Month,
+    CASE
+        WHEN get_json_string(spb.kafka_data, '$.status') = 'Готово'         THEN 'Закрыта'
+        WHEN get_json_string(spb.kafka_data, '$.status') IN ('В работе','Передано в СПБ') THEN 'В работе'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+    NULL AS F24_ibso_active,
+    NULL AS F25_rbo_active,
+    NULL AS F27_total_active,
+    NULL AS F28_total_closed
+FROM S0259.SPB_MAIN spb
+WHERE spb.op != 'd'
+  AND get_json_string(spb.kafka_data, '$.name') = 'Отдел Исполнения Запросов (УСУРП)'
+  AND get_json_string(spb.kafka_data, '$.category_name') = 'Расчет задолженности, выписки'
+  AND get_json_string(spb.kafka_data, '$.sr_type') IN ('KASPIDKDKZ', 'KASPIDKDOC', 'KASPIDKOPO2')
+  
+  
+//   ---------------------------------------------------------------------------------------------
+
+
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 4: Инциденты — Департамент Учета Kaspi Pay → Инцидент
+-- S0046.INCIDENT_INFO_FOR_DWH
+-- Фикс: CAST к VARCHAR(n) — ODBC не читает varchar(750000)
+-- Дедупликация: ROW_NUMBER() по s$change_date DESC → rn = 1
+-- ═══════════════════════════════════════════════════
+SELECT
+    F00_record_type,
+    F01_id,
+    F02_id_doctype,
+    F03_doctype_name,
+    F04_display_upper,
+    F05_sub_type,
+    F06_department,
+    F07_product_group,
+    F08_partner_name,
+    F09_bin_iin,
+    F10_account_iik,
+    F11_crm_request_id,
+    F12_contract_number,
+    F13_description,
+    F14_amount,
+    F15_doc_number,
+    F16_product,
+    F17_display_name,
+    F18_createdate,
+    F19_request_date,
+    F20_state,
+    F21_author_name,
+    F22_department_name,
+    F23_quantity,
+    F_Year,
+    F_Month,
+    F_StatusBucket,
+    NULL AS F24_ibso_active,
+    NULL AS F25_rbo_active,
+    NULL AS F27_total_active,
+    NULL AS F28_total_closed
+FROM (
+    SELECT
+        'Инцидент'                                             AS F00_record_type,
+        CAST(i.incidentid AS VARCHAR)                          AS F01_id,
+        NULL                                                   AS F02_id_doctype,
+        CAST(i.incindenttype AS VARCHAR(500))                  AS F03_doctype_name,
+        CAST(i.requesttitle AS VARCHAR(1000))                 AS F04_display_upper,
+        CAST(i.processes AS VARCHAR(500))                      AS F05_sub_type,
+        'Департамент Учета Kaspi Pay'                           AS F06_department,
+
+        CASE
+            WHEN i.incindenttype = 'Ошибка по взаиморасчетам'
+                THEN 'Взаиморасчеты'
+            WHEN i.incindenttype IN (
+                'Ошибки при запуске операции распределения погашения',
+                'Некорректные суммы для гашения по основному долгу',
+                'Не прошло полное досрочное гашение кредита',
+                'Некорректные суммы ПО после ЧДП',
+                'Статус договора некорректен',
+                'Вынос на просрочку ОД и % некорректен',
+                'Некорректные суммы для выноса по основному долгу',
+                'Ошибки при планировании плановых платежей',
+                'Ошибка при открытии договора',
+                'Ошибки при открытии счетов',
+                'Неверная сумма комиссии на форме операции',
+                'Ошибка при запуске операции',
+                'Имеется непогашенная задолженность',
+                'Некорректная настройка кредитной схемы',
+                'Некорректный график после ЧДП')
+                THEN 'Кредиты и гашение'
+            WHEN i.incindenttype IN (
+                'Ошибка в картотеки',
+                'Ошибка установки/снятия арестов',
+                'Ошибка при установке ареста на депозит',
+                'Ошибка при печати документа картотеки')
+                THEN 'Картотека и аресты'
+            WHEN i.incindenttype IN (
+                'Ошибка при открытии счета',
+                'Ошибка при закрытии счета',
+                'Ошибка при редактировании реквизитов счета',
+                'Некорректная информация в выписке',
+                'Ошибка при печати выписки',
+                'Не определяются счета для открытия')
+                THEN 'Счета'
+            WHEN i.incindenttype IN (
+                'Не происходит авторизация через сервер приложения',
+                'Не происходит авторизация через oracle client',
+                'Отказано в доступе',
+                'Пользователь не зарегистрирован в системе',
+                'Статус пользователя Блокирован',
+                'Экземпляр блокирован',
+                'Экземпляр(заявка) блокирован',
+                'Сбой соединения',
+                'TNS:невозможно разрешить заданный идентификатор соединения',
+                'TNS: Ошибка при авторизации (для проблем)',
+                'Ошибка авторизации',
+                'Ошибка при входе',
+                'Блокировка/разблокировка пользователя',
+                'Ошибка инициализации пользовательского контекста',
+                'Доступ на выполнение операции или представления отсутствует',
+                'Не удается авторизоваться на сайте',
+                'Ошибка при авторизации',
+                'Не удалось войти систему с выбранным профилем пользователя',
+                'Вход в систему для Вас заблокирован',
+                'Не удается войти в систему под общей УЗ',
+                'Ошибка о несоответствии версий Клиента и сервера',
+                'Приложение периодически запрашивает авторизацию')
+                THEN 'Авторизация и доступ'
+            WHEN i.incindenttype IN (
+                'Некорректные данные в отчете',
+                'Некорректная информация в отчете',
+                'Ошибка при формировании отчета',
+                'Отчет не формируется',
+                'Долгая работа операции',
+                'Долгая работа операции РБО',
+                'Медленная работа операции/действия',
+                'Медленная работа ПО',
+                'Долгое формирование отчета',
+                'Долгое формирование анализа',
+                'Задание по расписанию работает долго',
+                'Ошибка при запуске отчета')
+                THEN 'Отчетность'
+            WHEN i.incindenttype IN (
+                'Ошибка при проводке документа',
+                'Ошибка при редактировании документа',
+                'Не выходит документ при печати',
+                'Ошибка в документе',
+                'Ошибка при создании документа',
+                'Ошибка при создании проводки',
+                'Ошибка в шаблоне документа',
+                'Ошибка при печати',
+                'Ошибка при печати кассовых документов',
+                'Ошибка при печати счет-фактуры',
+                'Ошибка при печати выписки',
+                'Ошибка в формировании сводных документов',
+                'Не распечатываются документы при печати',
+                'Ошибка при отправке/получении документов  по уведомлению об открытии/закрытии счетов',
+                'Документ исчез, истекло время подписания документа',
+                'Не пришел документ на подписание',
+                'Не удается подписать документ',
+                'Ошибка при редактировании/просмотре сделки')
+                THEN 'Документы и проводки'
+            WHEN i.incindenttype IN (
+                'Ошибки с ПТП',
+                'Ошибки при начислении/списании комиссий',
+                'Ошибка обработки слипа',
+                'Ошибка при списании с карты',
+                'Ошибки в расчете задолженностей по картам',
+                'Ошибки при зачислении ЗП',
+                'Некорректное зачисление суммы',
+                'Выходит ошибка при пополнении за Kaspi Gold')
+                THEN 'Карты и Kaspi Gold'
+            WHEN i.incindenttype IN (
+                'Существует клиент с таким номером документа',
+                'Ошибка при редактировании анкеты клиента',
+                'Некорректные реквизиты клиента',
+                'Две карточки на клиента',
+                'Ошибка про просмотре фото клиента',
+                'Ошибка при заведении карточки клиента',
+                'Некорректные контакты клиента')
+                THEN 'Клиенты'
+            ELSE 'Прочее'
+        END AS F07_product_group,
+
+        CAST(i.raiseuser AS VARCHAR(500))                     AS F08_partner_name,
+        CAST(i.raiseuseriin AS VARCHAR(50))                    AS F09_bin_iin,
+        NULL                                                   AS F10_account_iik,
+        CAST(i.siebelid AS VARCHAR(100))                       AS F11_crm_request_id,
+        NULL                                                   AS F12_contract_number,
+        CAST(i.requestnote AS VARCHAR(4000))                   AS F13_description,
+        NULL                                                   AS F14_amount,
+        NULL                                                   AS F15_doc_number,
+        CAST(i.product AS VARCHAR(500))                        AS F16_product,
+        CAST(i.raiseuser AS VARCHAR(500))                      AS F17_display_name,
+        i.creationdate                                         AS F18_createdate,
+        i.resolutiondate                                       AS F19_request_date,
+        CAST(i.status AS VARCHAR(100))                         AS F20_state,
+        CAST(i.raiseuserloginname AS VARCHAR(500))              AS F21_author_name,
+        CAST(i.otdel AS VARCHAR(500))                           AS F22_department_name,
+        NULL                                                   AS F23_quantity,
+
+        YEAR(i.creationdate)   AS F_Year,
+        MONTH(i.creationdate)  AS F_Month,
+
+        CASE
+            WHEN i.status IN ('Закрыто','Выполнено') THEN 'Закрыта'
+            WHEN i.status IN ('В работе','Зарегистрирован','Запрошено доп. инфо','Прикреплен к родительскому инциденту') THEN 'В работе'
+            WHEN i.status = 'Отменен' THEN 'Отклонена'
+            ELSE 'Прочее'
+        END AS F_StatusBucket,
+
+        ROW_NUMBER() OVER (PARTITION BY i.incidentid ORDER BY i.s$change_date DESC) AS rn
+
+    FROM S0046.INCIDENT_INFO_FOR_DWH i
+    WHERE i.otdel IN (
+        'Департамент Учета Kaspi Pay',
+        'Управление Учета Продуктов Kaspi Pay',
+        'Управление Учета Клиринга',
+        'Управление Сопровождения Требований',
+        'Отдел Оплаты Картотеки',
+        'Отдел Контроля Требований',
+        'Отдел Поддержки Партнеров'
+    )
+    AND i.incidentcategory = 'Инцидент'
+    AND i.service IN ('ИБСО','РБО','РФО','Card Suite','1C учет','SNAP_IBSO','SNAP_RБО')
+) sub
+WHERE rn = 1
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 5: Расчеты задолженности — ДСР → Кредиты
+-- Мотив (id_doctype=1174, field2='Расчеты задолженности')
+-- БИН из field3, транши из ИБСО + РБО
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                              AS F00_record_type,
+    CAST(m.doc_id AS VARCHAR)                                 AS F01_id,
+    1174                                                     AS F02_id_doctype,
+    'Расчеты задолженности'                                  AS F03_doctype_name,
+    m.client_name                                            AS F04_display_upper,
+    'Расчеты задолженности'                                  AS F05_sub_type,
+    'ДСР'                                                    AS F06_department,
+    'Кредиты'                                                AS F07_product_group,
+    m.client_name                                            AS F08_partner_name,
+    m.bin_inn                                                AS F09_bin_iin,
+    NULL                                                     AS F10_account_iik,
+    NULL                                                     AS F11_crm_request_id,
+    NULL                                                     AS F12_contract_number,
+    NULL                                                     AS F13_description,
+    NULL                                                     AS F14_amount,
+    NULL                                                     AS F15_doc_number,
+    NULL                                                     AS F16_product,
+    m.client_name                                            AS F17_display_name,
+    m.doc_createdate                                         AS F18_createdate,
+    NULL                                                     AS F19_request_date,
+    CAST(m.doc_state AS VARCHAR(10))                         AS F20_state,
+    m.author_name                                            AS F21_author_name,
+    m.dep_name                                               AS F22_department_name,
+    NULL                                                     AS F23_quantity,
+    YEAR(m.doc_createdate)   AS F_Year,
+    MONTH(m.doc_createdate)  AS F_Month,
+    CASE
+        WHEN m.doc_state = 4                              THEN 'Закрыта'
+        WHEN m.doc_state = 0 AND m.doc_isrejected = 0      THEN 'В работе'
+        WHEN m.doc_state = 0 AND m.doc_isrejected IN (1,2) THEN 'Отклонена'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+    COALESCE(i.active, 0)                                    AS F24_ibso_active,
+    COALESCE(r.active, 0)                                    AS F25_rbo_active,
+    COALESCE(i.active, 0) + COALESCE(r.active, 0)           AS F27_total_active,
+    COALESCE(i.closed, 0) + COALESCE(r.closed, 0)           AS F28_total_closed
+FROM (
+    SELECT
+        d.id                                               AS doc_id,
+        d.field1                                           AS client_name,
+        d.createdate                                       AS doc_createdate,
+        d.state                                            AS doc_state,
+        d.isrejected                                       AS doc_isrejected,
+        e.name                                             AS author_name,
+        dep.name                                           AS dep_name,
+        REGEXP_REPLACE(d.field3, '[^0-9]', '')             AS bin_inn
+    FROM S0108.DOCUMENTS d
+    LEFT JOIN S0108.EMPLOYER e    ON d.id_author = e.id
+    LEFT JOIN S0108.DEPARTMENT dep ON d.id_department = dep.id
+    WHERE d.id_doctype = 1174
+      AND d.field2 = 'Расчеты задолженности'
+      AND d.isdeleted = 0
+      AND d.field3 IS NOT NULL
+      AND d.field3 != ''
+      AND LENGTH(REGEXP_REPLACE(d.field3, '[^0-9]', '')) = 12
+) m
+LEFT JOIN (
+    SELECT
+        c.c_inn AS bin_inn,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NULL THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NOT NULL THEN 1 ELSE 0 END) AS closed
+    FROM S06.Z_PR_CRED_JSON pr
+    JOIN S06.Z_CLIENT c ON CAST(GET_JSON_STRING(pr.AFTER_BODY, 'C_CLIENT') AS BIGINT) = c.id
+    LEFT JOIN S06.Z_PRODUCT p ON pr.ID = p.ID AND p.OP_TYPE != 'D'
+    WHERE pr.OP_TYPE != 'D'
+      AND GET_JSON_STRING(pr.AFTER_BODY, 'CLASS_ID') = 'KRED_CORP'
+      AND c.c_inn IS NOT NULL AND c.c_inn != ''
+    GROUP BY c.c_inn
+) i ON m.bin_inn = i.bin_inn
+LEFT JOIN (
+    SELECT
+        GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') AS bin_inn,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NULL
+                  OR GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') = 'None' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NOT NULL
+                  AND GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') != 'None' THEN 1 ELSE 0 END) AS closed
+    FROM S02.Z_BC_CRED bcc
+    JOIN S02.Z_CLIENT_JSON cj ON CAST(GET_JSON_STRING(bcc.AFTER_JSON, 'C_CLIENT_REF') AS BIGINT) = cj.ID
+    WHERE bcc.OP_TYPE != 'D' AND cj.S$OP_TYPE != 'D'
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') IS NOT NULL
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') != ''
+    GROUP BY GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN')
+) r ON m.bin_inn = r.bin_inn
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 6: Расчет задолженности (РЗ) — Debt Collection → Кредиты
+-- Мотив (id_doctype=931, field1='Запросы по платежкам', field7='ЮЛ')
+-- Фильтр: field4 содержит "расчет задолжен"
+-- БИН из field2, транши из ИБСО + РБО
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                              AS F00_record_type,
+    CAST(m.doc_id AS VARCHAR)                                 AS F01_id,
+    931                                                      AS F02_id_doctype,
+    'Расчет задолженности'                                   AS F03_doctype_name,
+    m.client_name                                            AS F04_display_upper,
+    'Расчет задолженности'                                   AS F05_sub_type,
+    'Debt Collection Business'                               AS F06_department,
+    'Кредиты'                                                AS F07_product_group,
+    m.client_name                                            AS F08_partner_name,
+    m.bin_inn                                                AS F09_bin_iin,
+    NULL                                                     AS F10_account_iik,
+    NULL                                                     AS F11_crm_request_id,
+    NULL                                                     AS F12_contract_number,
+    CAST(m.doc_text AS VARCHAR(4000))                        AS F13_description,
+    NULL                                                     AS F14_amount,
+    NULL                                                     AS F15_doc_number,
+    NULL                                                     AS F16_product,
+    m.client_name                                            AS F17_display_name,
+    m.doc_createdate                                         AS F18_createdate,
+    NULL                                                     AS F19_request_date,
+    CAST(m.doc_state AS VARCHAR(10))                         AS F20_state,
+    m.author_name                                            AS F21_author_name,
+    m.dep_name                                               AS F22_department_name,
+    NULL                                                     AS F23_quantity,
+    YEAR(m.doc_createdate)   AS F_Year,
+    MONTH(m.doc_createdate)  AS F_Month,
+    CASE
+        WHEN m.doc_state = 4                              THEN 'Закрыта'
+        WHEN m.doc_state = 0 AND m.doc_isrejected = 0      THEN 'В работе'
+        WHEN m.doc_state = 0 AND m.doc_isrejected IN (1,2) THEN 'Отклонена'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+    COALESCE(i.active, 0)                                    AS F24_ibso_active,
+    COALESCE(r.active, 0)                                    AS F25_rbo_active,
+    COALESCE(i.active, 0) + COALESCE(r.active, 0)           AS F27_total_active,
+    COALESCE(i.closed, 0) + COALESCE(r.closed, 0)           AS F28_total_closed
+FROM (
+    SELECT
+        d.id                                               AS doc_id,
+        d.field3                                           AS client_name,
+        d.field4                                           AS doc_text,
+        d.createdate                                       AS doc_createdate,
+        d.state                                            AS doc_state,
+        d.isrejected                                       AS doc_isrejected,
+        e.name                                             AS author_name,
+        dep.name                                           AS dep_name,
+        REGEXP_REPLACE(d.field2, '[^0-9]', '')             AS bin_inn
+    FROM S0108.DOCUMENTS d
+    LEFT JOIN S0108.EMPLOYER e    ON d.id_author = e.id
+    LEFT JOIN S0108.DEPARTMENT dep ON d.id_department = dep.id
+    WHERE d.id_doctype = 931
+      AND d.isdeleted = 0
+      AND d.field1 = 'Запросы по платежкам'
+      AND d.field7 = 'ЮЛ'
+      AND d.field2 IS NOT NULL AND d.field2 != ''
+      AND LENGTH(REGEXP_REPLACE(d.field2, '[^0-9]', '')) = 12
+      AND LOWER(d.field4) LIKE '%расчет%задолжен%'
+) m
+LEFT JOIN (
+    SELECT
+        c.c_inn AS bin_inn,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NULL THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NOT NULL THEN 1 ELSE 0 END) AS closed
+    FROM S06.Z_PR_CRED_JSON pr
+    JOIN S06.Z_CLIENT c ON CAST(GET_JSON_STRING(pr.AFTER_BODY, 'C_CLIENT') AS BIGINT) = c.id
+    LEFT JOIN S06.Z_PRODUCT p ON pr.ID = p.ID AND p.OP_TYPE != 'D'
+    WHERE pr.OP_TYPE != 'D'
+      AND GET_JSON_STRING(pr.AFTER_BODY, 'CLASS_ID') = 'KRED_CORP'
+      AND c.c_inn IS NOT NULL AND c.c_inn != ''
+    GROUP BY c.c_inn
+) i ON m.bin_inn = i.bin_inn
+LEFT JOIN (
+    SELECT
+        GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') AS bin_inn,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NULL
+                  OR GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') = 'None' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NOT NULL
+                  AND GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') != 'None' THEN 1 ELSE 0 END) AS closed
+    FROM S02.Z_BC_CRED bcc
+    JOIN S02.Z_CLIENT_JSON cj ON CAST(GET_JSON_STRING(bcc.AFTER_JSON, 'C_CLIENT_REF') AS BIGINT) = cj.ID
+    WHERE bcc.OP_TYPE != 'D' AND cj.S$OP_TYPE != 'D'
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') IS NOT NULL
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') != ''
+    GROUP BY GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN')
+) r ON m.bin_inn = r.bin_inn
+
+
+// ------------------------------------------------------------
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 7: Платежки — Debt Collection → Кредиты
+-- Мотив (id_doctype=931, field1='Запросы по платежкам', field7='ЮЛ')
+-- Все заявки (включая РЗ — пересечение учитывается в обоих)
+-- БИН из field2, транши из ИБСО + РБО
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                              AS F00_record_type,
+    CAST(m.doc_id AS VARCHAR)                                 AS F01_id,
+    931                                                      AS F02_id_doctype,
+    'Предоставление платежных документов по выдаче кредита' AS F03_doctype_name,
+    m.client_name                                            AS F04_display_upper,
+    'Запросы по платежкам'                                   AS F05_sub_type,
+    'Debt Collection Business'                               AS F06_department,
+    'Кредиты'                                                AS F07_product_group,
+    m.client_name                                            AS F08_partner_name,
+    m.bin_inn                                                AS F09_bin_iin,
+    NULL                                                     AS F10_account_iik,
+    NULL                                                     AS F11_crm_request_id,
+    NULL                                                     AS F12_contract_number,
+    CAST(m.doc_text AS VARCHAR(4000))                        AS F13_description,
+    NULL                                                     AS F14_amount,
+    NULL                                                     AS F15_doc_number,
+    NULL                                                     AS F16_product,
+    m.client_name                                            AS F17_display_name,
+    m.doc_createdate                                         AS F18_createdate,
+    NULL                                                     AS F19_request_date,
+    CAST(m.doc_state AS VARCHAR(10))                         AS F20_state,
+    m.author_name                                            AS F21_author_name,
+    m.dep_name                                               AS F22_department_name,
+    NULL                                                     AS F23_quantity,
+    YEAR(m.doc_createdate)   AS F_Year,
+    MONTH(m.doc_createdate)  AS F_Month,
+    CASE
+        WHEN m.doc_state = 4                              THEN 'Закрыта'
+        WHEN m.doc_state = 0 AND m.doc_isrejected = 0      THEN 'В работе'
+        WHEN m.doc_state = 0 AND m.doc_isrejected IN (1,2) THEN 'Отклонена'
+        ELSE 'Прочее'
+    END AS F_StatusBucket,
+    COALESCE(i.active, 0)                                    AS F24_ibso_active,
+    COALESCE(r.active, 0)                                    AS F25_rbo_active,
+    COALESCE(i.active, 0) + COALESCE(r.active, 0)           AS F27_total_active,
+    COALESCE(i.closed, 0) + COALESCE(r.closed, 0)           AS F28_total_closed
+FROM (
+    SELECT
+        d.id                                               AS doc_id,
+        d.field3                                           AS client_name,
+        d.field4                                           AS doc_text,
+        d.createdate                                       AS doc_createdate,
+        d.state                                            AS doc_state,
+        d.isrejected                                       AS doc_isrejected,
+        e.name                                             AS author_name,
+        dep.name                                           AS dep_name,
+        REGEXP_REPLACE(d.field2, '[^0-9]', '')             AS bin_inn
+    FROM S0108.DOCUMENTS d
+    LEFT JOIN S0108.EMPLOYER e    ON d.id_author = e.id
+    LEFT JOIN S0108.DEPARTMENT dep ON d.id_department = dep.id
+    WHERE d.id_doctype = 931
+      AND d.isdeleted = 0
+      AND d.field1 = 'Запросы по платежкам'
+      AND d.field7 = 'ЮЛ'
+      AND d.field2 IS NOT NULL AND d.field2 != ''
+      AND LENGTH(REGEXP_REPLACE(d.field2, '[^0-9]', '')) = 12
+) m
+LEFT JOIN (
+    SELECT
+        c.c_inn AS bin_inn,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NULL THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN p.C_DATE_CLOSE IS NOT NULL THEN 1 ELSE 0 END) AS closed
+    FROM S06.Z_PR_CRED_JSON pr
+    JOIN S06.Z_CLIENT c ON CAST(GET_JSON_STRING(pr.AFTER_BODY, 'C_CLIENT') AS BIGINT) = c.id
+    LEFT JOIN S06.Z_PRODUCT p ON pr.ID = p.ID AND p.OP_TYPE != 'D'
+    WHERE pr.OP_TYPE != 'D'
+      AND GET_JSON_STRING(pr.AFTER_BODY, 'CLASS_ID') = 'KRED_CORP'
+      AND c.c_inn IS NOT NULL AND c.c_inn != ''
+    GROUP BY c.c_inn
+) i ON m.bin_inn = i.bin_inn
+LEFT JOIN (
+    SELECT
+        GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') AS bin_inn,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NULL
+                  OR GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') = 'None' THEN 1 ELSE 0 END) AS active,
+        SUM(CASE WHEN GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') IS NOT NULL
+                  AND GET_JSON_STRING(bcc.AFTER_JSON, 'C_DATE_CLOSE') != 'None' THEN 1 ELSE 0 END) AS closed
+    FROM S02.Z_BC_CRED bcc
+    JOIN S02.Z_CLIENT_JSON cj ON CAST(GET_JSON_STRING(bcc.AFTER_JSON, 'C_CLIENT_REF') AS BIGINT) = cj.ID
+    WHERE bcc.OP_TYPE != 'D' AND cj.S$OP_TYPE != 'D'
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') IS NOT NULL
+      AND GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN') != ''
+    GROUP BY GET_JSON_STRING(cj.AFTER_KAFKA_DATA, 'C_INN')
+) r ON m.bin_inn = r.bin_inn
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 8: Госпошлина Бизнес Кредит (БК) — ИБСО
+-- S06.Z_KAS_REQUEST_PAY (vid_plat = 76781828737 / STATE_FEE_BC)
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                              AS F00_record_type,
+    GET_JSON_STRING(r.AFTER_BODY, '$.ID')                    AS F01_id,
+    NULL                                                     AS F02_id_doctype,
+    'Оплата госпошлины БК'                                   AS F03_doctype_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F04_display_upper,
+    'Госпошлина'                                             AS F05_sub_type,
+    'Debt Collection Business'                               AS F06_department,
+    'Кредиты'                                                AS F07_product_group,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUPPLIER')            AS F08_partner_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUPPLIER_IIN')        AS F09_bin_iin,
+    NULL                                                     AS F10_account_iik,
+    NULL                                                     AS F11_crm_request_id,
+    NULL                                                     AS F12_contract_number,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NAZN')                AS F13_description,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUMMA_PLAT')          AS F14_amount,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F15_doc_number,
+    NULL                                                     AS F16_product,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F17_display_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ')            AS F18_createdate,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ')            AS F19_request_date,
+    GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID')              AS F20_state,
+    NULL                                                     AS F21_author_name,
+    NULL                                                     AS F22_department_name,
+    NULL                                                     AS F23_quantity,
+    YEAR(GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ'))     AS F_Year,
+    MONTH(GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ'))    AS F_Month,
+    CASE
+        WHEN GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') = 'PAID' THEN 'Оплачено'
+        WHEN GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') IN ('VOZV_INIT', 'CREATE_PAY', 'UUKO_CONTROL', 'CONTROL_GB', 'CONTROL_UKZI', 'DBU_CONTROL', 'IN_WORK_DBU', 'IN_WORK_GB', 'IN_WORK_UKZI', 'AGREE_0', 'AGREE_1', 'AGREE_2', 'WAIT_BILL', 'FOR_PAYMENT') THEN 'В работе'
+        ELSE 'Не оплачено'
+    END AS F_StatusBucket,
+    NULL                                                     AS F24_ibso_active,
+    NULL                                                     AS F25_rbo_active,
+    NULL                                                     AS F27_total_active,
+    NULL                                                     AS F28_total_closed
+FROM S06.Z_KAS_REQUEST_PAY r
+WHERE r.S$OP_TYPE != 'D'
+  AND r.AFTER_BODY IS NOT NULL
+  AND GET_JSON_STRING(r.AFTER_BODY, '$.C_VID_PLAT') = '76781828737'
+  AND GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') IN ('PAID', 'ISNULL', 'VOZV_INIT', 'CREATE_PAY', 'UUKO_CONTROL', 'CONTROL_GB', 'CONTROL_UKZI', 'DBU_CONTROL', 'IN_WORK_DBU', 'IN_WORK_GB', 'IN_WORK_UKZI', 'AGREE_0', 'AGREE_1', 'AGREE_2', 'WAIT_BILL', 'FOR_PAYMENT')
+
+UNION ALL
+
+-- ═══════════════════════════════════════════════════
+-- ИСТОЧНИК 9: Госпошлина Единые взаиморасчеты (ЕР) — ИБСО
+-- S06.Z_KAS_REQUEST_PAY (vid_plat = 163199699211 / ER_STATE_DUTY)
+-- ═══════════════════════════════════════════════════
+SELECT
+    'Обращение'                                              AS F00_record_type,
+    GET_JSON_STRING(r.AFTER_BODY, '$.ID')                    AS F01_id,
+    NULL                                                     AS F02_id_doctype,
+    'Оплата госпошлины ЕР'                                   AS F03_doctype_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F04_display_upper,
+    'Госпошлина'                                             AS F05_sub_type,
+    'Debt Collection Business'                               AS F06_department,
+    'Единые взаиморасчеты'                                   AS F07_product_group,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUPPLIER')            AS F08_partner_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUPPLIER_IIN')        AS F09_bin_iin,
+    NULL                                                     AS F10_account_iik,
+    NULL                                                     AS F11_crm_request_id,
+    NULL                                                     AS F12_contract_number,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NAZN')                AS F13_description,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_SUMMA_PLAT')          AS F14_amount,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F15_doc_number,
+    NULL                                                     AS F16_product,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_NUM')                 AS F17_display_name,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ')            AS F18_createdate,
+    GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ')            AS F19_request_date,
+    GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID')              AS F20_state,
+    NULL                                                     AS F21_author_name,
+    NULL                                                     AS F22_department_name,
+    NULL                                                     AS F23_quantity,
+    YEAR(GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ'))     AS F_Year,
+    MONTH(GET_JSON_STRING(r.AFTER_BODY, '$.C_DATE_REQ'))    AS F_Month,
+    CASE
+        WHEN GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') = 'PAID' THEN 'Оплачено'
+        WHEN GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') IN ('VOZV_INIT', 'CREATE_PAY', 'UUKO_CONTROL', 'CONTROL_GB', 'CONTROL_UKZI', 'DBU_CONTROL', 'IN_WORK_DBU', 'IN_WORK_GB', 'IN_WORK_UKZI', 'AGREE_0', 'AGREE_1', 'AGREE_2', 'WAIT_BILL', 'FOR_PAYMENT') THEN 'В работе'
+        ELSE 'Не оплачено'
+    END AS F_StatusBucket,
+    NULL                                                     AS F24_ibso_active,
+    NULL                                                     AS F25_rbo_active,
+    NULL                                                     AS F27_total_active,
+    NULL                                                     AS F28_total_closed
+FROM S06.Z_KAS_REQUEST_PAY r
+WHERE r.S$OP_TYPE != 'D'
+  AND r.AFTER_BODY IS NOT NULL
+  AND GET_JSON_STRING(r.AFTER_BODY, '$.C_VID_PLAT') = '163199699211'
+  AND GET_JSON_STRING(r.AFTER_BODY, '$.STATE_ID') IN ('PAID', 'ISNULL', 'VOZV_INIT', 'CREATE_PAY', 'UUKO_CONTROL', 'CONTROL_GB', 'CONTROL_UKZI', 'DBU_CONTROL', 'IN_WORK_DBU', 'IN_WORK_GB', 'IN_WORK_UKZI', 'AGREE_0', 'AGREE_1', 'AGREE_2', 'WAIT_BILL', 'FOR_PAYMENT')
+
+
+
+UNION ALL
+
+
+SELECT
+    'Обращение'                                          AS F00_record_type,
+    CAST(dr.ID AS VARCHAR)                               AS F01_id,
+    NULL                                                 AS F02_id_doctype,
+    'Справка о наличии ссудной задолженности'            AS F03_doctype_name,
+    GET_JSON_STRING(dr.AFTER_BODY, '$.C_REQUEST_NUMBER') AS F04_display_upper,
+    'Запрос справки'                                     AS F05_sub_type,
+    'Департамент Поддержки Партнеров'                    AS F06_department,
+    'Кредиты'                                            AS F07_product_group,
+    NULL                                                 AS F08_partner_name,
+    NULL                                                 AS F09_bin_iin,
+    NULL                                                 AS F10_account_iik,
+    NULL                                                 AS F11_crm_request_id,
+    NULL                                                 AS F12_contract_number,
+    GET_JSON_STRING(dr.AFTER_BODY, '$.C_VH_NUM')         AS F13_description,
+    NULL                                                 AS F14_amount,
+    GET_JSON_STRING(dr.AFTER_BODY, '$.C_REQUEST_NUMBER') AS F15_doc_number,
+    NULL                                                 AS F16_product,
+    GET_JSON_STRING(dr.AFTER_BODY, '$.C_REQUEST_NUMBER') AS F17_display_name,
+    dr.C_REG_DATE                                        AS F18_createdate,
+    CAST(GET_JSON_STRING(dr.AFTER_BODY, '$.C_REQUEST_DATE') AS DATETIME) AS F19_request_date,
+    GET_JSON_STRING(st.AFTER_BODY, '$.C_NAME')           AS F20_state,
+    da.sogl_name                                         AS F21_author_name,
+    da.sogl_division                                     AS F22_department_name,
+    NULL                                                 AS F23_quantity,
+    YEAR(dr.C_REG_DATE)                                  AS F_Year,
+    MONTH(dr.C_REG_DATE)                                 AS F_Month,
+    CASE
+        WHEN GET_JSON_STRING(dr.AFTER_BODY, '$.C_STATUS') IN ('2723434641', '2260505535') THEN 'Исполнена'
+        WHEN GET_JSON_STRING(dr.AFTER_BODY, '$.C_STATUS') = '26398878080'                 THEN 'Возвращена без исполнения'
+        ELSE 'В работе'
+    END                                                  AS F_StatusBucket,
+    NULL                                                 AS F24_ibso_active,
+    NULL                                                 AS F25_rbo_active,
+    NULL                                                 AS F27_total_active,
+    NULL                                                 AS F28_total_closed
+FROM S06.Z_KAS_DEBT_REQUEST dr
+LEFT JOIN S06.Z_COM_STATUS_PRD st
+    ON CAST(GET_JSON_STRING(dr.AFTER_BODY, '$.C_STATUS') AS BIGINT) = st.ID
+JOIN (
+    SELECT
+        o.COLLECTION_ID AS audit_id,
+        MAX(GET_JSON_STRING(u_s.AFTER_BODY,'$.C_NAME')) AS sogl_name,
+        MAX(COALESCE(ss.DIVIS_NAME, ss.DEPART_NAME))    AS sogl_division
+    FROM S06.Z_KAS_DEBT_REQUEST dr2
+    JOIN S06.Z_OBJ_HISTORY o
+      ON o.COLLECTION_ID = CAST(GET_JSON_STRING(dr2.AFTER_BODY,'$.C_AUDIT') AS BIGINT)
+    JOIN S06.Z_USER u_s
+      ON CAST(GET_JSON_STRING(o.AFTER_BODY,'$.C_CHANGE_USER') AS BIGINT) = u_s.ID
+    JOIN S0008.S_STAFFLIST2 ss
+      ON ss.TAB_NUM = GET_JSON_STRING(u_s.AFTER_BODY,'$.C_NUM_TAB')
+     AND ss.DEPART_NAME = 'Департамент Учета Kaspi Pay'
+    WHERE dr2.`S$OP_TYPE` != 'D'
+      AND GET_JSON_STRING(o.AFTER_BODY,'$.C_REASON') IN ('ИБСО','ИБСО-КБ','Показать суммы')
+      AND CAST(GET_JSON_STRING(o.AFTER_BODY,'$.C_CHANGE_DATE') AS DATETIME) >= COALESCE(ss.LAST_ASSIGN_DATE, ss.HIRING_DATE)
+      AND CAST(GET_JSON_STRING(o.AFTER_BODY,'$.C_CHANGE_DATE') AS DATETIME) <  COALESCE(ss.FIRING_DATE, CAST('3000-01-01' AS DATETIME))
+    GROUP BY o.COLLECTION_ID
+) da
+    ON da.audit_id = CAST(GET_JSON_STRING(dr.AFTER_BODY, '$.C_AUDIT') AS BIGINT)
+WHERE dr.`S$OP_TYPE` != 'D'
+;

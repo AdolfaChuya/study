@@ -1,0 +1,150 @@
+LIB CONNECT TO 'staroks';
+
+Premises:
+
+LOAD
+	PERIOD,
+    EFFECTIVEDATE,
+    COUNTERAGENT,
+    COUNTERAGENTIIN,
+    CONTRACTIDDATE,
+    ISNDS,
+    AMOUNTCHANGECOUNT,
+    MONTHAMOUNT,
+    CURRENTAMOUNT,
+    MONTHAMOUNTNONDS,
+    SQMETERPRICE,
+    BRANCHOFFICE,
+    ROOMTYPE,
+    DECRYPTION,
+    OWNERSHIPTYPE,
+    AREA,
+    STAFFAREA,
+    FIXPRICETERM,
+    MAXRISEPERCENT,
+    UTILITIES,
+    DIVISIONCODE,
+    DIVISIONNAME,
+    JURIDICALADDRESS,
+    EMPLOYEENUM;
+
+
+
+
+SQL
+SELECT PERIOD,
+       A.EFFECTIVEDATE,
+       A.COUNTERAGENT,
+       A.COUNTERAGENTIIN,
+       A.CONTRACTIDDATE,
+       A.ISNDS,
+       A.AMOUNTCHANGECOUNT,
+       A.MONTHAMOUNT,
+       A.CURRENTAMOUNT,
+       A.MONTHAMOUNTNONDS,
+       A.SQMETERPRICE,
+       A.BRANCHOFFICE,
+       A.ROOMTYPE,
+       A.DECRYPTION,
+       A.OWNERSHIPTYPE,
+       A.AREA,
+       A.STAFFAREA,
+       A.FIXPRICETERM,
+       A.MAXRISEPERCENT,
+       A.UTILITIES,
+       A.DIVISIONCODE,
+       A.DIVISIONNAME,
+       A.JURIDICALADDRESS,
+       A.EMPLOYEENUM 
+FROM (
+SELECT PERIOD,
+       A.EFFECTIVEDATE,
+       A.COUNTERAGENT,
+       A.COUNTERAGENTIIN,
+       A.CONTRACTIDDATE,
+       A.ISNDS,
+       ROW_NUMBER() OVER (PARTITION BY period, COUNTERAGENTIIN ORDER BY period, COUNTERAGENTIIN, AMOUNTCHANGECOUNT, EFFECTIVEDATE) AS RN,
+       A.AMOUNTCHANGECOUNT,
+       A.MONTHAMOUNT,
+       A.CURRENTAMOUNT,
+       A.MONTHAMOUNTNONDS,
+       A.SQMETERPRICE,
+       A.BRANCHOFFICE,
+       A.ROOMTYPE,
+       A.DECRYPTION,
+       A.OWNERSHIPTYPE,
+       A.AREA,
+       A.STAFFAREA,
+       A.FIXPRICETERM,
+       A.MAXRISEPERCENT,
+       A.UTILITIES,
+       A.DIVISIONCODE,
+       A.DIVISIONNAME,
+       A.JURIDICALADDRESS,
+       A.EMPLOYEENUM
+FROM (
+SELECT DISTINCT CAST(DATE_FORMAT(A.PERIOD, '%Y-%m-%01') AS DATE) PERIOD,
+       A.EFFECTIVEDATE,
+       A.COUNTERAGENT,
+       A.COUNTERAGENTIIN,
+       A.CONTRACTIDDATE,
+       A.ISNDS,
+       A.AMOUNTCHANGECOUNT,
+       A.MONTHAMOUNT,
+       A.CURRENTAMOUNT,
+       A.MONTHAMOUNTNONDS,
+       A.SQMETERPRICE,
+       A.BRANCHOFFICE,
+       A.ROOMTYPE,
+       A.DECRYPTION,
+       A.OWNERSHIPTYPE,
+       A.AREA,
+       A.STAFFAREA,
+       A.FIXPRICETERM,
+       A.MAXRISEPERCENT,
+       A.UTILITIES,
+       A.DIVISIONCODE,
+       A.DIVISIONNAME,
+       A.JURIDICALADDRESS,
+       A.EMPLOYEENUM
+FROM (select 
+DISTINCT 
+`S$CHANGE_DATE`,
+`S$KFK_TIMESTAMP`,
+guid, 
+CAST(get_json_string(a.pr, '$.period') AS DATE) as period,
+CAST(get_json_string(a.pr, '$.effectiveDate') AS DATETIME) as effectiveDate,
+get_json_string(a.pr, '$.counteragent') as counteragent,
+get_json_string(a.pr, '$.counteragentIin') as counteragentIin,
+get_json_string(a.pr, '$.contractIdDate') as contractIdDate,
+get_json_string(a.pr, '$.isNDS') as isNDS,
+get_json_string(a.pr, '$.amountChangeCount') as amountChangeCount,
+get_json_string(a.pr, '$.monthAmount') as monthAmount,
+get_json_string(a.pr, '$.currentAmount') as CURRENTAMOUNT,
+get_json_string(a.pr, '$.monthAmountNoNDS') as monthAmountNoNDS,
+get_json_string(a.pr, '$.sqMeterPrice') as sqMeterPrice,
+get_json_string(a.pr, '$.branchOffice') as branchOffice,
+get_json_string(a.pr, '$.roomType') as roomType,
+get_json_string(a.pr, '$.decryption') as decryption,
+get_json_string(a.pr, '$.ownershipType') as ownershipType,
+get_json_string(a.pr, '$.area') as area,
+get_json_string(a.pr, '$.staffArea') as staffArea,
+get_json_string(a.pr, '$.fixPriceTerm') as fixPriceTerm,
+get_json_string(a.pr, '$.maxRisePercent') as maxRisePercent,
+get_json_string(a.pr, '$.utilities') as utilities,
+get_json_string(a.pr, '$.divisionCode') as divisionCode,
+get_json_string(a.pr, '$.divisionName') as divisionName,
+get_json_string(a.pr, '$.juridicalAddress') as juridicalAddress,
+get_json_string(a.pr, '$.employeeNum') as employeeNum
+
+from S0115.BANK_PREMISES A
+LEFT OUTER JOIN LATERAL unnest(CAST((JSON_BODY->'agreements.agreement') AS ARRAY<JSON>)) a(pr) ON TRUE) A
+
+WHERE A.currentAmount IS NOT NULL
+AND A.currentAmount <> 0
+ORDER BY PERIOD,
+         AMOUNTCHANGECOUNT,
+         EFFECTIVEDATE
+)A
+)A
+WHERE RN = 1;

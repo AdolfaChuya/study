@@ -1,0 +1,92 @@
+LIB CONNECT TO 'staroks';
+
+ReportOSNMA:
+Load
+	Date(DATE_BEGIN, 'DD.MM.YYYY') as [Дата начало],
+    YEAR(DATE_BEGIN) as [Год],
+    MonthName(DATE_BEGIN) as [Отчетный период],
+    DATE(DATE_END, 'DD.MM.YYYY') as [Дата конец],
+    IF(CIT like '*111*','Головной Банк (ЗИП)', IF(CIT like '*Южная*','Алматы',  SubField(CIT,'г. ',2))) as CITY,
+    SCORE,
+    KODKOF,
+    KOF,
+    OSNMA_NAME as OSNMANAME,
+    DATE(DATE_ARRIVAL, 'DD.MM.YYYY') as [Дата оприходования],
+    AMORT_NORM as NORMAAMORT,
+    AMORT_PERIOD as AMORTZAPERIOD,
+    ACCUMULATED_AMOUNT as NAKOPLENNAYAAMORT,
+    START_AMOUNT as NACHALNAYASTOIMOST,
+    CURRENT_AMOUNT as TEKUSHAYASTOIMOST,
+    MOL,
+    POLL,
+    PERSONAL_PERSON as PERSONALNOELICO,
+    STR_PODR_NAME as STRPODRNAME,
+    ADRES,
+    PLACE as MESTO,
+    CODE,
+    SERIAL_NUMBER as SERIALNUMBER,
+    COMMENT as COMMENTARYI,
+    MOLL,
+    CIT,
+   	QUANTITY;
+SQL
+SELECT 
+ LAST_VALUE(A.STR_PODR_NAME) OVER (PARTITION BY CODE) as CIT
+,LAST_VALUE(A.MOL) OVER (PARTITION BY CODE) as MOLL
+,LAST_VALUE(A.PERSONAL_PERSON) OVER (PARTITION BY CODE) as POLL
+,LAST_VALUE(A.ADDRESS) OVER (PARTITION BY CODE) as ADRES
+,      A.DATE_BEGIN
+,      A.DATE_END
+,      A.SCORE
+,      A.KODKOF
+,      A.KOF
+,      A.OSNMA_NAME 
+,      A.DATE_ARRIVAL
+,      A.AMORT_NORM
+,      A.AMORT_PERIOD
+,      A.ACCUMULATED_AMOUNT 
+,      A.START_AMOUNT 
+,      A.CURRENT_AMOUNT
+,      A.MOL
+,      A.PERSONAL_PERSON
+,      A.STR_PODR_NAME
+,      A.PLACE
+,      A.CODE
+,      A.SERIAL_NUMBER
+,      A.COMMENT
+,      COUNT(CODE) OVER (PARTITION BY CODE) QUANTITY
+FROM BI_VIEW.S0008_REPORTOSNMA A
+WHERE 1 = 1
+AND YEAR(A.DATE_BEGIN) = 2026
+AND A.KODKOF IN (  '142.275111', '142.275112', '142.282000', '142.274024', '144.254000', '141.291050', '143.263011', '142.264033', '150.257300', '142.275120',
+                   '142.271230', '142.264040', '141.291022', '142.275126', '150.310111', '142.289900', '150.310911', '210.620390', '150.139300', '141.291030',
+                   '150.259900', '150.310100', '143.262000', '150.310112', '142.282322', '143.263010', '142.271100', '150.310910', '142.262018', '150.329959',
+                   '143.263023', '141.291024', '150.310210', '142.275125', '142.282300', '142.282321', '150.257360', '150.257310', '141.291021', '143.263050',
+                   '142.282311', '142.264030', '150.259921', '141.309910', '142.282323', '142.282216', '143.262017', '141.291020', '141.300000', '142.279040',
+                   '142.275110', '142.267013', '142.289000', '150.310010', '150.310110', '142.289111', '131.200001', '142.275128', '142.273111', '142.282313',
+                   '142.265163', '143.262016', '144.254010', '142.262012', '150.257330', '142.282312', '142.274025', '142.262011', '150.310200', '142.275127',
+                   '150.310900', '150.323014', '150.310913', '143.262012', '142.262017' );
+                   
+                   
+Exel:
+
+LOAD distinct
+    "Инвентарный номер" as CODE,
+    KHE
+FROM [lib://kaspi_service (hq_samenov_55251)/Амортизация_.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+INNER JOIN
+
+SPR:
+LOAD
+    KHE,
+    "Подразделение по КХЕ"
+FROM [lib://kaspi_service (hq_samenov_55251)/Амортизация_.xlsx]
+(ooxml, embedded labels, table is Лист2);
+
+Right JOIN
+Load *
+Resident ReportOSNMA;
+drop table ReportOSNMA;
+                     

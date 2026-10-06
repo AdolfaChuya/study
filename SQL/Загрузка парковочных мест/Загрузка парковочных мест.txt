@@ -1,0 +1,254 @@
+LIB CONNECT TO 'staroks (BKS)';
+// Data_Parking:
+// SQL
+// SELECT dp.* 
+// FROM S0008.DATA_PARKING AS dp
+// WHERE dp.ENDDATE = (SELECT MAX(ENDDATE) FROM S0008.DATA_PARKING) 
+//   AND dp.PERIOD >= '2024-07-01';
+
+
+pivot_parking_timeline:
+LOAD 
+	EMPLOYEENAME AS [Имя сотрудника],
+    Actual_Parking_Assignment AS [Назначение парк места],
+    CREATIONDATE AS [Дата создания записи],
+    DIRECTORATE AS [Дирекция],
+    DEPARTMENT AS [Департамент],
+    MANAGEMENT AS [Управление],
+    DIVISION AS [Дивизион],
+    STRUCTURALUNIT AS [Структурное подразделение],
+    SUBDIVISION AS [Подразделение],
+    BLOCK AS [Блок],
+    POSITION AS [Позиция],
+    EMPLOYMENTTYPE AS [Тип парковки],
+    CARBRAND AS [Бренд машины],
+    LICENSEPLATE AS [Номер машины],
+    PARKINGPROVISIONDATE AS [Дата выдачи парк-места],
+    USAGEENDDATE AS [Срок действия до],
+    DAY AS [Дней на дату],
+    PARKING AS [Парковка],
+    NUMBEROFPARKING AS [Номер парк-места],
+	PERIOD AS [Период],
+    Year(PERIOD) AS [Год],
+    Date(MonthStart(PERIOD), 'MMM YYYY') AS [Месяц и год],
+    PARKING & ' | ' & NUMBEROFPARKING as UniqueSpotID,
+    Date(MonthStart(PERIOD), 'MMM YYYY') & Upper(PurgeChar(EMPLOYEENAME, ' ')) AS KEY_TRIP
+;
+SQL
+WITH t1 AS (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (
+            PARTITION BY EMPLOYEENAME, PERIOD, NUMBEROFPARKING 
+            ORDER BY ENDDATE DESC
+        ) as rn
+    FROM S0008.DATA_PARKING
+    WHERE PERIOD >= '2025-01-01' and PARKING != 'САТТИ' and NUMBEROFPARKING IS NOT NULL and EMPLOYEENAME IS NOT NULL 
+    AND (PERIOD >= '2026-02-01' OR DAY > 0)
+),
+t2 as (
+    SELECT * FROM t1 WHERE rn = 1
+    UNION ALL
+    SELECT 
+        EMPLOYEENAME, CREATIONDATE, DIRECTORATE, DEPARTMENT, MANAGEMENT, DIVISION,
+        STRUCTURALUNIT, SUBDIVISION, BLOCK, POSITION, EMPLOYMENTTYPE, CARBRAND,
+        LICENSEPLATE, PARKINGPROVISIONDATE, USAGEENDDATE, DAY, PARKING,
+        NUMBEROFPARKING, S$CHANGE_DATE, STARTDATE, ENDDATE,
+        (SELECT MAX(PERIOD) FROM S0008.DATA_PARKING) AS PERIOD,
+        TYPOFPARKINGSPACE, 1 AS rn
+    FROM S0008.DATA_PARKING AS dp
+    WHERE dp.TYPOFPARKINGSPACE IS NOT NULL 
+      AND dp.TYPOFPARKINGSPACE != '' 
+      and PARKING != 'САТТИ'
+      AND dp.ENDDATE = (SELECT MAX(ENDDATE) FROM S0008.DATA_PARKING) 
+      AND dp.PERIOD IS NULL
+)
+SELECT 
+    *,
+    -- Если дата в будущем — оставляем как есть. 
+    -- Если сегодня или в прошлом — тянем последнее актуальное значение.
+    CASE 
+        WHEN PERIOD > CURRENT_DATE THEN TYPOFPARKINGSPACE 
+        ELSE FIRST_VALUE(
+                CASE WHEN PERIOD <= CURRENT_DATE THEN TYPOFPARKINGSPACE END
+             ) OVER (
+                PARTITION BY NUMBEROFPARKING, PARKING
+                ORDER BY CASE WHEN PERIOD <= CURRENT_DATE THEN PERIOD END DESC NULLS LAST, 
+                         ENDDATE DESC
+             )
+    END AS Actual_Parking_Assignment
+FROM t2;
+
+
+LEFT JOIN (pivot_parking_timeline)
+LOAD
+    UniqueSpotID,
+    [Период],
+    Sum([Дней на дату]) as Temp_Sum_Day
+RESIDENT pivot_parking_timeline 
+GROUP BY UniqueSpotID, [Период];
+
+LEFT JOIN (pivot_parking_timeline)
+load
+BUYER_FIO AS [Имя сотрудника],
+POSITION,
+ID;
+sql
+WITH emp_pos as 
+(SELECT 
+	t1.ID,
+	FIO AS BUYER_FIO, 
+    POSITION, 
+    HIRING_DATE, 
+    row_number() over(partition by FIO order by HIRING_DATE DESC) as rn 
+FROM (SELECT 
+	CONCAT_WS(' ', `LAST_NAME`, `FIRST_NAME`,IF(TRIM(`MIDDLE_NAME`) = '' OR ISNULL(`MIDDLE_NAME`), NULL, `MIDDLE_NAME`)) FIO,
+    POSITION,
+    HIRING_DATE,
+    up.ID
+FROM S0008.EMPLOYEES es LEFT JOIN (SELECT ID, POSITION FROM S0008.USERS_POSITIONS) up ON up.ID = es.POSITION_ID) t1)
+SELECT DISTINCT BUYER_FIO, POSITION, ID from emp_pos WHERE rn = 1;
+
+LEFT JOIN (pivot_parking_timeline)
+LOAD
+    ID,
+    Класс AS category
+FROM [lib://AttachedFiles/Position ID CATEGORY.xlsx]
+(ooxml, embedded labels, table is _xlnm._FilterDatabase);
+
+EMP_LIST:
+LOAD DISTINCT 
+    Upper(PurgeChar([Имя сотрудника], ' ')) as KEY_FIO 
+RESIDENT pivot_parking_timeline;
+
+KASPI_RAW:
+NOCONCATENATE
+LOAD
+    Upper(PurgeChar(STATUS_FIO, ' ')) as KEY_FIO,
+    Floor(Date([Дата])) as StatusDate, 
+    [Тип записи] as Status,
+    Upper(PurgeChar(STATUS_FIO, ' ')) & '|' & [Тип записи] as TempKey
+FROM [lib://QVD Tables/HR/STATUS.qvd] (qvd)
+WHERE 
+    Year([Дата]) >= 2025
+    AND Match([Тип записи], 'стандартное отсутствие', 'длительное отсутствие') 
+    AND EXISTS(KEY_FIO, Upper(PurgeChar(STATUS_FIO, ' ')));
+    
+KASPI_RAW2:
+NOCONCATENATE
+LOAD
+    KEY_FIO,
+    StatusDate,
+    Status,
+    TempKey
+RESIDENT KASPI_RAW;
+DROP TABLE KASPI_RAW;
+
+KASPI_SORTED:
+NOCONCATENATE
+LOAD *, max(1) as hz RESIDENT KASPI_RAW2
+GROUP BY KEY_FIO, StatusDate, Status, TempKey; 
+DROP TABLE KASPI_RAW2;
+DROP Field hz;
+
+KASPI_SORTED2:
+NOCONCATENATE
+LOAD * RESIDENT KASPI_SORTED
+ORDER BY KEY_FIO, StatusDate ASC; 
+DROP TABLE KASPI_SORTED;
+
+KASPI_PREP:
+NOCONCATENATE
+LOAD
+    *,
+    Peek('TempKey')    as PrevKey,
+    Num(Peek('StatusDate')) + 1 as ExpectedDate 
+RESIDENT KASPI_SORTED2;
+DROP TABLE KASPI_SORTED2;
+
+KASPI_GROUPS:
+NOCONCATENATE
+LOAD
+    *,
+    IF(TempKey = PrevKey AND Num(StatusDate) = ExpectedDate, 
+       Peek('GroupID'), 
+       RangeSum(Peek('GroupID'), 1)
+    ) as GroupID
+RESIDENT KASPI_PREP;
+DROP TABLE KASPI_PREP;
+
+
+FINAL_ABSENCE_REPORT:
+NOCONCATENATE
+LOAD
+    KEY_FIO as [Имя сотрудника ГГ],
+    Status as [Статус],
+    Date(Min(StatusDate)) as [Дата начала],
+    Date(Max(StatusDate)) as [Дата окончания],
+    Count(StatusDate) as [Количество дней в месяце],
+    'с ' & Date(Min(StatusDate), 'DD.MM.YYYY') & ' по ' & Date(Max(StatusDate), 'DD.MM.YYYY') as [Период]
+RESIDENT KASPI_GROUPS
+GROUP BY KEY_FIO, Status, GroupID, MonthStart(StatusDate);
+
+DROP TABLE KASPI_GROUPS;
+
+FINAL_ABSENCE_REPORT_2:
+LOAD 
+[Имя сотрудника ГГ],
+[Статус],
+[Дата начала],
+[Дата окончания],
+[Количество дней в месяце],
+[Период] AS [Период отсутствия],
+Date(MonthStart([Дата начала]), 'MMM YYYY') & [Имя сотрудника ГГ] as KEY_TRIP
+RESIDENT FINAL_ABSENCE_REPORT;
+DROP TABLE FINAL_ABSENCE_REPORT;
+DROP Table EMP_LIST;
+
+Final_Table:
+LOAD
+    *,
+    If(MonthStart([Период]) = MonthStart(Today()), 1, 0) as [Текущий месяц]
+RESIDENT pivot_parking_timeline
+WHERE UniqueSpotID <> ' | ' AND UniqueSpotID <> ''  AND 
+NOT ([Номер парк-места] = '10' AND [Парковка] = 'Наземный Каблан' AND (IsNull([Имя сотрудника]) OR [Имя сотрудника] = '')); 
+DROP TABLE pivot_parking_timeline;
+
+
+Left Join (Final_Table)
+LOAD
+    KEY_TRIP,
+    Sum([Количество дней в месяце]) as Temp_Sum_Dayoff
+RESIDENT FINAL_ABSENCE_REPORT_2 
+GROUP BY KEY_TRIP;
+
+Final_Table_2:
+LOAD
+    *,
+    If((Temp_Sum_Day+Coalesce(Temp_Sum_Dayoff, 0)) >= 10, '>= 10', 'меньше 10') as [Флаг Обоснованности]
+RESIDENT Final_Table
+WHERE [Парковка] <> 'САТТИ'; 
+DROP Field Temp_Sum_Day;
+DROP Field Temp_Sum_Dayoff;
+DROP TABLE Final_Table;
+
+
+ZAYAVKI_PARKING:
+LOAD NUMDOC as [Номер заявки],
+    EMPLOYEENAME as [Заявитель],
+    STATUSDOC as [Статус заявки],
+    POSITION as [Должность],
+    STRUCTURALUNIT,
+    SUBDIVISION,
+    DATEDOC as [Дата заявки],
+    `S$CHANGE_DATE`;
+SQL SELECT NUMDOC,
+    EMPLOYEENAME,
+    STATUSDOC, 
+    POSITION,
+    STRUCTURALUNIT,
+    SUBDIVISION,
+    DATEDOC,
+    `S$CHANGE_DATE`
+FROM S0008.`PARKING_REQUESTS_IN_THE_QUEUE`;
+

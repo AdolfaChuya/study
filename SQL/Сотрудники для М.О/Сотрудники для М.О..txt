@@ -1,0 +1,930 @@
+LIB CONNECT TO 'BKS_dev OLEDB';
+
+LET varMinDate = Num(MakeDate(2010,01,1));
+LET varMaxDate = Floor(num(Today()-1));
+LET vYesterday = Floor(Today() - 1);
+
+TemporaryCalendar:
+LOAD 
+	Date($(varMinDate) + IterNo() - 1) as TempDate
+	AutoGenerate 1
+	While $(varMinDate) + IterNo() - 1 <= $(varMaxDate);
+
+MasterCalendar:
+LOAD
+	TempDate as "Дата",
+    Date(MonthStart(TempDate), 'MMM.YY') as "Месяц+Год",
+	Year(TempDate) as "Год",
+    Month(TempDate) as "Месяц",
+	if(Floor(TempDate) = Floor(MonthEnd(TempDate)), 1, 
+		if(Floor(TempDate) = $(varMaxDate), 1)) as "Конец месяца",
+	Week(TempDate, 0, 1, 1) as "Неделя",
+    if(Floor(TempDate) = Floor(WeekEnd(TempDate)), 1, 
+		if(Floor(TempDate) = $(varMaxDate), 1)) as "Конец недели"
+RESIDENT TemporaryCalendar;
+
+DROP TABLE TemporaryCalendar;
+
+LEFT JOIN
+LOAD 
+	date(floor(CALENDAR_DATE), 'DD.MM.YYYY') as "Дата",
+    IS_DAY_OFF_FLG as "Выходной";
+SQL
+SELECT
+	CALENDAR_DATE,
+    '1' as IS_DAY_OFF_FLG
+FROM BI.HR_CALENDAR_V
+WHERE CALENDAR_DATE >= DATE '2010-01-01' AND IS_DAY_OFF_FLG = 'Y';
+
+
+
+
+
+
+
+
+DEPARTMENTS:
+// иерархия подразделений АО Kaspi bank
+Hierarchy(IDDEP, PARENTIDRREF, DESCRIPTION)
+LOAD
+	*;
+SQL
+SELECT
+	IDREF as IDDEP,
+	CODETP,
+	PARENTIDRREF,
+	Replace(DESCRIPTION, ' ', ' ') as DESCRIPTION, // замена неразрывного пробела (Alt+0160) на обычный
+    KXE
+FROM DWH_STAGE2.S0008$DEPARTMENTS;
+
+Rename Field DESCRIPTION to "Подразделение";
+Rename Field DESCRIPTION1 to "Уровень 0";
+Rename Field DESCRIPTION2 to "Уровень 1";
+Rename Field DESCRIPTION3 to "Уровень 2";
+Rename Field DESCRIPTION4 to "Уровень 3";
+Rename Field DESCRIPTION5 to "Уровень 4";
+Rename Field DESCRIPTION6 to "Уровень 5";
+Rename Field DESCRIPTION7 to "Уровень 6";
+Rename Field DESCRIPTION8 to "Уровень 7";
+Rename Field CODETP to "Код подразделения";
+Rename Field KXE to "КХЕ";
+
+Drop Field PARENTIDRREF;
+
+LEFT JOIN (DEPARTMENTS)
+// дополняем каждое подразделение городом, к которому оно прикреплено в 1С (работает только для АО Kaspi bank)
+LOAD
+	IDDEP,
+	DESCRIPTIONCITY as "Город подразделения";
+SQL
+SELECT
+	IDDEP,
+	DESCRIPTIONCITY
+FROM BI.HR_DEPARTMENT_CITY_V;
+
+PREV_DEPARTMENTS:
+// справочник для определения, откуда был совершен перевод
+LOAD
+	IDDEP as "PREV_IDDEP",
+	"Подразделение" as "Откуда: Подразделение",
+	"Уровень 0" as "Откуда: Уровень 0",
+	"Уровень 1" as "Откуда: Уровень 1",
+	"Уровень 2" as "Откуда: Уровень 2",
+	"Уровень 3" as "Откуда: Уровень 3",
+	"Уровень 4" as "Откуда: Уровень 4",
+	"Уровень 5" as "Откуда: Уровень 5",
+	"Уровень 6" as "Откуда: Уровень 6",
+	"Уровень 7" as "Откуда: Уровень 7",
+	"Город подразделения" as "Откуда: Город подразделения",
+	"Код подразделения" as "Откуда: Код подразделения"
+RESIDENT DEPARTMENTS;
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+POSITIONS:
+// должности
+LOAD
+	IDPOS,
+	POSITIONNAME as "Должность",
+	ISBOSSPOSITION as "Руководящая должность";
+SQL
+SELECT
+	ID as IDPOS,
+	POSITIONNAME,
+	ISBOSSPOSITION
+FROM DWH_STAGE2.S0008$POSITIONSLIST;
+
+PREV_POSITIONS:
+// справочник для определения, откуда был совершен перевод
+LOAD
+	IDPOS as "PREV_IDPOS",
+	"Должность" as "Откуда: Должность",
+	"Руководящая должность" as "Откуда: Руководящая должность"
+RESIDENT POSITIONS;
+
+STATUS_START_END:
+// действующие сотрудники АО Kaspi bank
+LOAD
+	'Штат' as "Тип контракта",
+	CORPID,
+	UNIID,
+	1 as UNIPRIORITY,
+	IDEMPL as STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	date(floor(PERIOD), 'DD.MM.YYYY') as START_DATE_SYS,
+	if(OPERSTATE = 'Увольнение', Null(),
+		if(previous(TABNO) <> TABNO AND previous(CORPID) <> CORPID, Null(), date(previous(floor(PERIOD))-1, 'DD.MM.YYYY'))) as END_DATE_SYS,
+	if(OPERSTATE = 'Увольнение', Null(),
+		if(previous(TABNO) = TABNO AND previous(CORPID) = CORPID AND previous(OPERSTATE) = 'Прием на работу', Null(),
+			if(previous(TABNO) = TABNO AND previous(CORPID) = CORPID AND previous(date(floor(PERIOD), 'DD.MM.YYYY')) = date(floor(PERIOD), 'DD.MM.YYYY'), Null(), 'действующий'))) as "Тип записи",
+	TABNO as STATUS_TABNO,
+	BIN,
+	IIN as STATUS_IIN,
+	ROUND(RATE, 0.01) as STATUS_RATE;
+SQL
+SELECT
+	IDEMPL,
+	IDDEP,
+	IDPOS,
+	IDDEP||IDPOS as DEP_POS,
+	OPERSTATE,
+	trunc(PERIOD) as PERIOD,
+	PERIOD as PERIOD_1C,
+	TABNO,
+	BIN,
+	IIN,
+	(CASE
+		WHEN IIN IS NULL THEN IDEMPL||('-')||BIN
+		ELSE IIN||('-')||BIN
+	END) as CORPID,
+	(CASE
+		WHEN IIN IS NULL THEN IDEMPL
+		ELSE IIN
+	END) as UNIID,
+	RATE
+FROM DWH_STAGE2.S0008$STAFOPERDATA
+// тест-кейсы
+// WHERE IIN IN(
+// 	'920706300083', '900514451975',	'010414600725',	'960723300793',	'721013401622',	'010721600635',	'910120350029',	'000702600621',	'010805601634',	'920608351329',
+// 	'930826402166',	'880808300351',	'930612451061',	'020123601149',	'911206400574',	'901221401156',	'930929301726',	'890421300677',	'810731400169',	'921106300665',
+// 	'830512401142',	'900331300924',	'981021300416',	'990219302091', '801015300021', '981021300416', '840317401141', '910918401570', '801015401323', '860802450675',
+// 	'921209301435', '930909450424', '930607401216', '910704401091', '950819400620', '930812450982', '891210401409', '860904401176', '031231650783', '930809301011',
+// 	'831203400471', '910808300647'
+// 	) OR IDEMPL = '94b0975e-331d-11de-98fa-000e0c08c0bb'
+ORDER BY IDEMPL, PERIOD_1C DESC, TABNO DESC;
+
+NoConcatenate
+// исправляем нестыковки в датах начала для каждой компании
+STATUS_START_END_TEMP:
+LOAD
+	*,
+	date(
+		if(peek(CORPID) = CORPID AND [Тип контракта] = 'ГПХ' AND peek([Тип контракта]) = 'Штат' AND START_DATE_SYS <= peek(END_DATE_SYS), peek(END_DATE_SYS)+1, START_DATE_SYS)
+		, 'DD.MM.YYYY') as CORP_START_DATE
+RESIDENT STATUS_START_END
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS ASC, END_DATE_SYS ASC;
+
+DROP TABLE STATUS_START_END;
+
+NoConcatenate
+// исправляем нестыковки в датах окончания для каждой компании
+STATUS_START_END:
+LOAD
+	*,
+	date(
+		if(peek(CORPID) = CORPID AND [Тип контракта] = 'ГПХ' AND peek([Тип контракта]) = 'Штат' AND peek(START_DATE_SYS) <= END_DATE_SYS, peek(START_DATE_SYS)-1, END_DATE_SYS)
+		, 'DD.MM.YYYY') as CORP_END_DATE
+RESIDENT STATUS_START_END_TEMP
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS DESC, END_DATE_SYS DESC;
+
+DROP TABLE STATUS_START_END_TEMP;
+
+DROP FIELD START_DATE_SYS;
+DROP FIELD END_DATE_SYS;
+
+RENAME FIELD [Тип записи] TO [CORP Тип записи];
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// исправляем нестыковки в датах начала для каждого сотрудника
+UNI_START_END_TEMP:
+LOAD
+	*,
+	if(peek(UNIID) = UNIID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, CORP_START_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY <= peek(UNIPRIORITY) AND peek([Тип контракта]) = 'ГПХ', CORP_START_DATE,
+		if(peek(UNIID) = UNIID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, CORP_START_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND CORP_START_DATE <= peek(CORP_END_DATE), date(peek(CORP_END_DATE)+1, 'DD.MM.YYYY'),
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND CORP_START_DATE > peek(CORP_END_DATE), CORP_START_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), CORP_START_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND CORP_START_DATE > peek(CORP_END_DATE), CORP_START_DATE,
+		if(peek(UNIID) <> UNIID, CORP_START_DATE, Null())))))))) as START_DATE
+RESIDENT STATUS_START_END
+WHERE [CORP Тип записи] = 'действующий'
+ORDER BY UNIID ASC, CORP_START_DATE ASC, CORP_END_DATE ASC, UNIPRIORITY ASC, BIN ASC;
+
+NoConcatenate
+// исправляем нестыковки в датах окончания для каждого сотрудника
+UNI_START_END:
+LOAD
+	*,
+	if(peek(UNIID) = UNIID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, CORP_END_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY < peek(UNIPRIORITY) AND STATUS_RATE < 0.5 AND peek(CORP_START_DATE) <> CORP_START_DATE AND peek(CORP_START_DATE) <= CORP_END_DATE, date(peek(CORP_START_DATE)-1, 'DD.MM.YYYY'),
+		if(peek(UNIID) = UNIID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, CORP_END_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) <= CORP_END_DATE, date(peek(CORP_START_DATE)-1, 'DD.MM.YYYY'),
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) > CORP_END_DATE, CORP_END_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), CORP_END_DATE,
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND peek(CORP_START_DATE) > CORP_END_DATE, CORP_END_DATE,
+		if(peek(UNIID) <> UNIID, CORP_END_DATE, Null())))))))) as END_DATE,
+	if(IsNull(START_DATE), Null(),
+		if(peek(UNIID) = UNIID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND UNIPRIORITY < peek(UNIPRIORITY) AND STATUS_RATE < 0.5 AND peek(CORP_START_DATE) <> CORP_START_DATE AND peek(CORP_START_DATE) <= CORP_END_DATE, [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) <= CORP_END_DATE, [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) > CORP_END_DATE, [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), [CORP Тип записи],
+		if(peek(UNIID) = UNIID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND peek(CORP_START_DATE) > CORP_END_DATE, [CORP Тип записи],
+		if(peek(UNIID) <> UNIID, [CORP Тип записи], Null()))))))))) as "Тип записи",
+	'Kaspi.kz' as "Тип логики"
+RESIDENT UNI_START_END_TEMP
+WHERE [CORP Тип записи] = 'действующий'
+ORDER BY UNIID ASC, CORP_START_DATE DESC, CORP_END_DATE DESC, UNIPRIORITY ASC, BIN ASC;
+
+DROP TABLE UNI_START_END_TEMP;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// исправляем нестыковки в датах начала для каждого сотрудника внутри каждой компании
+CORP_START_END_TEMP:
+LOAD
+	*,
+	if(peek(CORPID) = CORPID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, CORP_START_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY <= peek(UNIPRIORITY) AND peek([Тип контракта]) = 'ГПХ', CORP_START_DATE,
+		if(peek(CORPID) = CORPID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, CORP_START_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND CORP_START_DATE <= peek(CORP_END_DATE), date(peek(CORP_END_DATE)+1, 'DD.MM.YYYY'),
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND CORP_START_DATE > peek(CORP_END_DATE), CORP_START_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), CORP_START_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND CORP_START_DATE > peek(CORP_END_DATE), CORP_START_DATE,
+		if(peek(CORPID) <> CORPID, CORP_START_DATE, Null())))))))) as START_DATE
+RESIDENT STATUS_START_END
+WHERE [CORP Тип записи] = 'действующий'
+ORDER BY CORPID ASC, CORP_START_DATE ASC, CORP_END_DATE ASC, UNIPRIORITY ASC, BIN ASC;
+
+DROP TABLE STATUS_START_END;
+
+NoConcatenate
+// исправляем нестыковки в датах окончания для каждого сотрудника внутри каждой компании
+CORP_START_END:
+LOAD
+	*,
+	if(peek(CORPID) = CORPID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, CORP_END_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY < peek(UNIPRIORITY) AND STATUS_RATE < 0.5 AND peek(CORP_START_DATE) <> CORP_START_DATE AND peek(CORP_START_DATE) <= CORP_END_DATE, date(peek(CORP_START_DATE)-1, 'DD.MM.YYYY'),
+		if(peek(CORPID) = CORPID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, CORP_END_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) <= CORP_END_DATE, date(peek(CORP_START_DATE)-1, 'DD.MM.YYYY'),
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) > CORP_END_DATE, CORP_END_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), CORP_END_DATE,
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND peek(CORP_START_DATE) > CORP_END_DATE, CORP_END_DATE,
+		if(peek(CORPID) <> CORPID, CORP_END_DATE, Null())))))))) as END_DATE,
+	if(IsNull(START_DATE), Null(),
+		if(peek(CORPID) = CORPID AND UNIPRIORITY <= peek(UNIPRIORITY) AND STATUS_RATE >= 0.5, [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND UNIPRIORITY < peek(UNIPRIORITY) AND STATUS_RATE < 0.5 AND peek(CORP_START_DATE) <> CORP_START_DATE AND peek(CORP_START_DATE) <= CORP_END_DATE, [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND BIN = peek(BIN) AND STATUS_RATE < 0.5, [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) <= CORP_END_DATE, [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND [Тип контракта] = 'ГПХ' AND peek(CORP_START_DATE) > CORP_END_DATE, [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE > peek(STATUS_RATE), [CORP Тип записи],
+		if(peek(CORPID) = CORPID AND UNIPRIORITY > peek(UNIPRIORITY) AND STATUS_RATE = peek(STATUS_RATE) AND peek(CORP_START_DATE) > CORP_END_DATE, [CORP Тип записи],
+		if(peek(CORPID) <> CORPID, [CORP Тип записи], Null()))))))))) as "Тип записи",
+	'Каждое АО/ТОО отдельно' as "Тип логики"
+RESIDENT CORP_START_END_TEMP
+WHERE [CORP Тип записи] = 'действующий'
+ORDER BY CORPID ASC, CORP_START_DATE DESC, CORP_END_DATE DESC, UNIPRIORITY ASC, BIN ASC;
+
+DROP TABLE CORP_START_END_TEMP;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// объединяем все таблицы
+STATUS_START_END:
+LOAD
+	*,
+	SubField(CORPID, '-', 1)&'-Kaspi.kz' as CORPID_NEW
+RESIDENT UNI_START_END;
+
+Concatenate (STATUS_START_END)
+LOAD
+	*,
+	CORPID as CORPID_NEW
+RESIDENT CORP_START_END;
+
+DROP FIELD CORPID;
+RENAME FIELD CORPID_NEW TO CORPID;
+
+DROP TABLE UNI_START_END;
+DROP TABLE CORP_START_END;
+
+RENAME FIELD START_DATE TO START_DATE_SYS;
+RENAME FIELD END_DATE TO END_DATE_SYS;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+LEFT JOIN (STATUS_START_END)
+// добавляем значения для расчета притоков и оттоков на разных уровнях
+LOAD
+	IDDEP,
+	[Уровень 1] as LVL1,
+	[Уровень 1]&'\'&[Уровень 2] as LVL2,
+	[Уровень 1]&'\'&[Уровень 2]&'\'&[Уровень 3] as LVL3,
+	[Уровень 1]&'\'&[Уровень 2]&'\'&[Уровень 3]&'\'&[Уровень 4] as LVL4,
+	[Уровень 1]&'\'&[Уровень 2]&'\'&[Уровень 3]&'\'&[Уровень 4]&'\'&[Уровень 5] as LVL5,
+	[Уровень 1]&'\'&[Уровень 2]&'\'&[Уровень 3]&'\'&[Уровень 4]&'\'&[Уровень 5]&'\'&[Уровень 6] as LVL6,
+	[Уровень 1]&'\'&[Уровень 2]&'\'&[Уровень 3]&'\'&[Уровень 4]&'\'&[Уровень 5]&'\'&[Уровень 6]&'\'&[Уровень 7] as LVL7
+RESIDENT DEPARTMENTS;
+
+LEFT JOIN (STATUS_START_END)
+LOAD
+	IDPOS,
+	[Должность] as LVLPOS
+RESIDENT POSITIONS;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// для последующего определения штатной ставки на каждый день
+EVERYDAY_RATE:
+LOAD
+	CORPID,
+	START_DATE_SYS,
+	if(IsNull(END_DATE_SYS), date(today()-1, 'DD.MM.YYYY'), END_DATE_SYS) as END_DATE_SYS,
+	STATUS_RATE
+RESIDENT STATUS_START_END
+WHERE "Тип логики" = 'Каждое АО/ТОО отдельно';
+
+// преобразуем периоды в данные по датам
+IntervalMatch (Дата)
+ 
+LEFT JOIN (EVERYDAY_RATE)
+LOAD DISTINCT
+	START_DATE_SYS,
+	END_DATE_SYS
+RESIDENT EVERYDAY_RATE;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+STATUS_TEMP:
+// приемы
+LOAD
+	"Тип контракта",
+	CORPID,
+	UNIID,
+	UNIPRIORITY,
+	BIN,
+	STATUS_IIN,
+	STATUS_RATE,
+	STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	START_DATE_SYS,
+	END_DATE_SYS,
+	date(START_DATE_SYS, 'DD.MM.YYYY') as START_DATE,
+	date(START_DATE_SYS, 'DD.MM.YYYY') as END_DATE,
+	if(peek(CORPID) <> CORPID, 'прием',
+		if(peek(CORPID) = CORPID AND (START_DATE_SYS-peek(END_DATE_SYS))>14, 'прием', Null())) as "Тип записи",
+	STATUS_TABNO,
+	1 as SORT_TYPE,
+	"Тип логики"
+RESIDENT STATUS_START_END
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS ASC, STATUS_TABNO DESC;
+
+Concatenate
+// переводы
+LOAD
+	"Тип контракта",
+	CORPID,
+	UNIID,
+	UNIPRIORITY,
+	BIN,
+	STATUS_IIN,
+	STATUS_RATE,
+	STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	START_DATE_SYS,
+	END_DATE_SYS,
+	START_DATE_SYS as START_DATE,
+	START_DATE_SYS as END_DATE,
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, 'перевод', Null()) as "Тип записи",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek(BIN), Null()) as "PREV_BIN",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek(IDDEP), Null()) as "PREV_IDDEP",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek(IDPOS), Null()) as "PREV_IDPOS",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek(DEP_POS), Null()) as "PREV_DEP_POS",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek([Тип контракта]), Null()) as "Откуда: Тип контракта",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14, peek([STATUS_RATE]), Null()) as "Откуда: Штатная ставка",
+	LVL1, LVL2, LVL3, LVL4, LVL5, LVL6, LVL7, LVLPOS,
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND [Тип контракта] = peek([Тип контракта]), 1, 0) as "Внутри Типа контракта",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL1 = peek(LVL1), 1, 0) as "Внутри Уровня 1",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL2 = peek(LVL2), 1, 0) as "Внутри Уровня 2",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL3 = peek(LVL3), 1, 0) as "Внутри Уровня 3",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL4 = peek(LVL4), 1, 0) as "Внутри Уровня 4",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL5 = peek(LVL5), 1, 0) as "Внутри Уровня 5",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL6 = peek(LVL6), 1, 0) as "Внутри Уровня 6",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL7 = peek(LVL7), 1, 0) as "Внутри Уровня 7",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVLPOS = peek(LVLPOS), 1, 0) as "Внутри Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL1&'\'&LVLPOS = peek(LVL1)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 1 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL2&'\'&LVLPOS = peek(LVL2)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 2 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL3&'\'&LVLPOS = peek(LVL3)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 3 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL4&'\'&LVLPOS = peek(LVL4)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 4 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL5&'\'&LVLPOS = peek(LVL5)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 5 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL6&'\'&LVLPOS = peek(LVL6)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 6 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (START_DATE_SYS-peek(END_DATE_SYS))<=14 AND LVL7&'\'&LVLPOS = peek(LVL7)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 7 и Должности",
+	STATUS_TABNO,
+	2 as SORT_TYPE,
+	"Тип логики"
+RESIDENT STATUS_START_END
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS ASC, STATUS_TABNO DESC;
+
+Concatenate
+// переводы с позиции для оттока
+LOAD
+	"Тип контракта",
+	CORPID,
+	UNIID,
+	UNIPRIORITY,
+	BIN,
+	STATUS_IIN,
+	STATUS_RATE,
+	STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	START_DATE_SYS,
+	END_DATE_SYS,
+	date(END_DATE_SYS+1, 'DD.MM.YYYY') as START_DATE,
+	date(END_DATE_SYS+1, 'DD.MM.YYYY') as END_DATE,
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14, 'отток: перевод', Null()) as "Тип записи",
+	LVL1, LVL2, LVL3, LVL4, LVL5, LVL6, LVL7, LVLPOS, 
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND [Тип контракта] = peek([Тип контракта]), 1, 0) as "Внутри Типа контракта",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL1 = peek(LVL1), 1, 0) as "Внутри Уровня 1",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL2 = peek(LVL2), 1, 0) as "Внутри Уровня 2",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL3 = peek(LVL3), 1, 0) as "Внутри Уровня 3",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL4 = peek(LVL4), 1, 0) as "Внутри Уровня 4",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL5 = peek(LVL5), 1, 0) as "Внутри Уровня 5",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL6 = peek(LVL6), 1, 0) as "Внутри Уровня 6",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL7 = peek(LVL7), 1, 0) as "Внутри Уровня 7",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVLPOS = peek(LVLPOS), 1, 0) as "Внутри Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL1&'\'&LVLPOS = peek(LVL1)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 1 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL2&'\'&LVLPOS = peek(LVL2)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 2 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL3&'\'&LVLPOS = peek(LVL3)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 3 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL4&'\'&LVLPOS = peek(LVL4)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 4 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL5&'\'&LVLPOS = peek(LVL5)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 5 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL6&'\'&LVLPOS = peek(LVL6)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 6 и Должности",
+	if(peek(CORPID) = CORPID AND (peek([Тип контракта]) <> [Тип контракта] OR peek(DEP_POS) <> DEP_POS) AND (peek(START_DATE_SYS)-END_DATE_SYS)<=14 AND LVL7&'\'&LVLPOS = peek(LVL7)&'\'&peek(LVLPOS), 1, 0) as "Внутри Уровня 7 и Должности",
+	STATUS_TABNO,
+	"Тип логики"
+RESIDENT STATUS_START_END
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS DESC, STATUS_TABNO DESC;
+
+DROP Fields LVL1, LVL2, LVL3, LVL4, LVL5, LVL6, LVL7, LVLPOS;
+
+Concatenate
+// увольнения
+LOAD
+	"Тип контракта",
+	CORPID,
+	UNIID,
+	UNIPRIORITY,
+	BIN,
+	STATUS_IIN,
+	STATUS_RATE,
+	STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	START_DATE_SYS,
+	END_DATE_SYS,
+	END_DATE_SYS as START_DATE,
+	END_DATE_SYS as END_DATE,
+	if(Not IsNull(END_DATE_SYS),
+		if(peek(CORPID, -1) <> CORPID, 'увольнение',
+			if(peek(CORPID, -1) = CORPID AND (peek(START_DATE_SYS, -1)-END_DATE_SYS)>14, 'увольнение', Null()))) as "Тип записи",
+	STATUS_TABNO,
+	3 as SORT_TYPE,
+	"Тип логики"
+RESIDENT STATUS_START_END
+WHERE [Тип записи] = 'действующий'
+ORDER BY CORPID ASC, START_DATE_SYS DESC, STATUS_TABNO DESC;
+
+// увольнения для оттока считаются ниже, так как к ним добавляются данные по декретам
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// выбираем только типы записи
+STATUS:
+LOAD
+	*
+RESIDENT STATUS_TEMP
+WHERE Not IsNull([Тип записи]);
+
+DROP TABLE STATUS_TEMP;
+
+
+///////////////////////////////////////////////////////////////////////////////////
+
+
+NoConcatenate
+// определение периодов
+STATUS_PERIOD:
+LOAD
+	"Тип контракта",
+	CORPID,
+	UNIID,
+	UNIPRIORITY,
+	BIN,
+	STATUS_IIN,
+	STATUS_RATE,
+	STATUS_IDEMPL,
+	IDDEP,
+	IDPOS,
+	DEP_POS,
+	START_DATE,
+	if([Тип записи] = 'увольнение', Null(),
+		if(peek(CORPID) <> CORPID, date(today()-1, 'DD.MM.YYYY'), 
+			if(peek([Тип записи]) = 'увольнение', date(peek(START_DATE), 'DD.MM.YYYY'), date(peek(START_DATE)-1, 'DD.MM.YYYY')))) as "END_DATE",
+	if([Тип записи] = 'увольнение', Null(),
+		if([Тип записи] = 'прием', 'Прием', 'Перевод')) as "Тип начала",
+	if([Тип записи] = 'увольнение', Null(),
+		if(peek(CORPID) <> CORPID, Null(), 
+			if(peek([Тип записи]) = 'увольнение', 'Увольнение', 'Перевод'))) as "Тип окончания",
+	if([Тип записи] = 'увольнение', 'увольнение', 'действующий') as "Тип записи",
+	SORT_TYPE,
+	STATUS_TABNO,
+	"Тип логики"
+RESIDENT STATUS
+WHERE match([Тип записи], 'прием', 'перевод', 'увольнение')
+ORDER BY CORPID ASC, START_DATE DESC, SORT_TYPE DESC, STATUS_TABNO DESC;
+
+CONCATENATE (STATUS)
+// добавляем периоды в общую таблицу
+LOAD
+	*
+RESIDENT STATUS_PERIOD
+WHERE [Тип записи] = 'действующий';
+
+// добавляем дату приема для каждой записи для расчета стажа
+NoConcatenate
+HIRE_DATE_TEMP:
+LOAD DISTINCT
+	CORPID,
+	START_DATE,
+	"Тип записи"
+RESIDENT STATUS;
+
+LEFT JOIN
+LOAD DISTINCT
+	CORPID,
+	START_DATE as "HIRE_DATE_TEMP"
+RESIDENT STATUS
+WHERE [Тип записи] = 'прием';
+
+
+LEFT JOIN (STATUS)
+// оставляем только одну дату приема
+LOAD DISTINCT
+	CORPID,
+	START_DATE,
+	"Тип записи",
+	date(FirstSortedValue(distinct HIRE_DATE_TEMP, -HIRE_DATE_TEMP), 'DD.MM.YYYY') as STATUS_HIRE_DATE,
+	date(FirstSortedValue(distinct HIRE_DATE_TEMP, -HIRE_DATE_TEMP), 'DD.MM.YYYY')&' '&CORPID as HISTORY_IDEMPL
+RESIDENT HIRE_DATE_TEMP
+WHERE START_DATE >= HIRE_DATE_TEMP
+GROUP BY CORPID, START_DATE, [Тип записи];
+
+// добавляем дату увольнения для каждой записи приема, чтобы отследить прохождение испытательного срока
+LEFT JOIN (STATUS)
+LOAD DISTINCT
+	HISTORY_IDEMPL,
+    'прием' as [Тип записи],
+    START_DATE as STATUS_FIRE_DATE
+RESIDENT STATUS
+WHERE [Тип записи] = 'увольнение';
+
+
+DROP TABLE HIRE_DATE_TEMP;
+
+
+DROP TABLE STATUS_PERIOD;
+DROP TABLE STATUS_START_END;
+DROP TABLE EVERYDAY_RATE;
+DROP TABLES DEPARTMENTS, PREV_DEPARTMENTS, POSITIONS, PREV_POSITIONS;
+
+DROP FIELDS UNIPRIORITY, STATUS_RATE, PREV_IDDEP, PREV_IDPOS, "PREV_BIN", PREV_DEP_POS, "Откуда: Тип контракта", "Откуда: Штатная ставка";
+DROP FIELDS "Внутри Типа контракта", "Внутри Уровня 1", "Внутри Уровня 2", "Внутри Уровня 3", "Внутри Уровня 4", "Внутри Уровня 5", "Внутри Уровня 6", "Внутри Уровня 7", "Внутри Должности";
+DROP FIELDS "Внутри Уровня 1 и Должности", "Внутри Уровня 2 и Должности", "Внутри Уровня 3 и Должности", "Внутри Уровня 4 и Должности", "Внутри Уровня 5 и Должности", "Внутри Уровня 6 и Должности", "Внутри Уровня 7 и Должности";
+
+
+// 1. Фиксируем "вчера" один раз, чтобы ускорить расчет
+LET vYesterday = Floor(Today() - 1);
+
+STATUS_FINAL:
+// СЛОЙ 3: Финальный расчет стажа (Общий vs В должности)
+LOAD 
+    *,
+    // Стаж от даты приема в компанию
+    Floor((Actual_END - STATUS_HIRE_DATE + 1) / 30.4, 0.1) as [Общий стаж],
+    // Стаж от даты начала текущего периода/должности
+    Floor((Actual_END - START_DATE + 1) / 30.4, 0.1) as [Стаж в должности]
+;
+// СЛОЙ 2: Определяем единую конечную дату для расчетов
+LOAD 
+    *,
+    If(IsNull("Тип окончания") OR END_DATE >= Today(), $(vYesterday), END_DATE) as Actual_END
+;
+// СЛОЙ 1: Загрузка твоих полей из таблицы в памяти
+LOAD 
+    STATUS_TABNO,
+    STATUS_IDEMPL,
+    "Тип окончания",
+    [Тип записи],
+    START_DATE,
+    END_DATE,
+    STATUS_HIRE_DATE
+Resident STATUS
+Where [Тип записи] = 'действующий';
+
+
+inner join(STATUS_FINAL)
+Load
+	STATUS_IDEMPL,
+    MAX(START_DATE) AS START_DATE
+Resident STATUS_FINAL
+GROUP BY STATUS_IDEMPL;
+
+DROP FIELD Actual_END;
+DROP TABLES STATUS;
+DROP Fields END_DATE, STATUS_TABNO, START_DATE, [Тип записи], "Тип окончания";
+
+LIB CONNECT TO 'staroks (BKS)';
+
+KASPI_EMP:
+LOAD *
+WHERE [Тип контракта] = 'Штат' and [Тип логики] = 'Kaspi.kz';
+LOAD
+    distinct Upper(PurgeChar(STATUS_FIO, ' ')) as KEY_FIO,
+    STATUS_FIO AS ФИО,
+    STATUS_IDEMPL,
+    STATUS_IIN as ИИН,
+    [Тип контракта],
+    STATUS_HIRE_DATE AS [Дата приёма],
+    IDDEP,
+    START_DATE,
+    END_DATE,
+    [Тип логики],
+    STATUS_TABNO,
+    STATUS_SEX,
+    STATUS_BIRTHDATE
+FROM [lib://QVD Tables/HR/STATUS.qvd] (qvd)
+WHERE Match([Тип записи],
+            'действующий',
+            'длительное отсутствие',
+            'переходный период') AND MATCH([Дата], Date(Today()-2, 'DD.MM.YYYY'));
+
+
+LEFT JOIN (KASPI_EMP)
+load
+Upper(PurgeChar(BUYER_FIO, ' ')) as KEY_FIO,
+POSITION,
+ID;
+sql
+WITH emp_pos as 
+(
+	SELECT 
+		t1.ID,
+		FIO AS BUYER_FIO, 
+    	POSITION, 
+    	HIRING_DATE, 
+    	TAB_NUM,
+    	row_number() over(partition by FIO order by HIRING_DATE DESC) as rn 
+	FROM 
+    	(
+        SELECT 
+			CONCAT_WS(' ', `LAST_NAME`, `FIRST_NAME`,IF(TRIM(`MIDDLE_NAME`) = '' OR ISNULL(`MIDDLE_NAME`), NULL, `MIDDLE_NAME`)) FIO,
+    		POSITION,
+    		HIRING_DATE,
+    		up.ID,
+            TAB_NUM
+		FROM S0008.EMPLOYEES es LEFT JOIN (SELECT ID, POSITION FROM S0008.USERS_POSITIONS) up ON up.ID = es.POSITION_ID
+        WHERE FIRING_DATE IS NULL OR FIRING_DATE < HIRING_DATE
+        ) t1
+)
+SELECT DISTINCT BUYER_FIO, POSITION, ID, TAB_NUM from emp_pos WHERE rn = 1;
+
+LIB CONNECT TO 'BKS_dev OLEDB';
+
+// LEFT JOIN (KASPI_EMP)
+// LOAD
+// Upper(PurgeChar(FIO, ' ')) as KEY_FIO,
+// Date(BIRTHDATE, 'DD.MM.YYYY') as [Дата рождения],
+// IF(SEX = 1, 'Муж', 'Жен') as Пол
+// ;
+// SQL
+// SELECT
+// 	DESCRIPTION as FIO,
+// 	BIRTHDATE,
+// 	SEX,
+// 	(CASE
+// 		WHEN LENGTH(trim(PHONE)) = 11 THEN SUBSTR(trim(PHONE), 2, 10)
+// 		WHEN LENGTH(trim(PHONE)) = 10 THEN PHONE
+// 	END) as PHONE_NUMBER,
+// 	EMAIL as E_MAIL
+// FROM DWH_STAGE2.S0008$EMPLLIST;
+
+DEPARTMENTS:
+// иерархия подразделений АО Kaspi bank
+Hierarchy(IDDEP, PARENTIDRREF, DESCRIPTION)
+LOAD
+	*;
+SQL
+SELECT
+	IDREF as IDDEP,
+	CODETP,
+	PARENTIDRREF,
+	Replace(DESCRIPTION, ' ', ' ') as DESCRIPTION, // замена неразрывного пробела (Alt+0160) на обычный
+    KXE
+FROM DWH_STAGE2.S0008$DEPARTMENTS;
+
+Rename Field DESCRIPTION to "Подразделение";
+Rename Field DESCRIPTION1 to "Уровень 0";
+Rename Field DESCRIPTION2 to "Уровень 1";
+Rename Field DESCRIPTION3 to "Уровень 2";
+Rename Field DESCRIPTION4 to "Уровень 3";
+Rename Field DESCRIPTION5 to "Уровень 4";
+Rename Field DESCRIPTION6 to "Уровень 5";
+Rename Field DESCRIPTION7 to "Уровень 6";
+Rename Field DESCRIPTION8 to "Уровень 7";
+Rename Field CODETP to "Код подразделения";
+Rename Field KXE to "КХЕ";
+
+LEFT JOIN (DEPARTMENTS)
+LOAD
+	IDDEP,
+	DESCRIPTIONCITY as "Город подразделения";
+SQL
+SELECT
+	IDDEP,
+	DESCRIPTIONCITY
+FROM BI.HR_DEPARTMENT_CITY_V;
+
+Drop Field PARENTIDRREF;
+Drop Field KEY_FIO;
+
+
+LEFT JOIN (KASPI_EMP)
+Load 
+	IDDEP, 
+    [Уровень 0],
+    [Уровень 1],
+    [Уровень 2],
+    [Уровень 3],
+    [Уровень 4],
+    [Уровень 5],
+    [Уровень 6],
+    [Уровень 7],
+    Подразделение,
+    [Город подразделения]
+Resident DEPARTMENTS;
+DROP TABLE DEPARTMENTS;
+
+// Формируем финальную таблицу сразу с фильтрацией
+KASPI_EMP_FILTERED:
+LOAD *, 
+    1 as IsNeededEmployee,
+    IF(MATCH(POSITION, 'Водитель', 'Водитель Легкового Автомобиля', 'Водитель-Инкассатор', 'Грузчик', 'Заведующий Складом', 'Кладовщик', 'Разнорабочий', 'Специалист по Обслуживанию Зда', 'Ведущий Специалист по Обслужив', 'Электрик', 'Специалист по Подготовке Инкассаторов', 'Инкассатор-Сборщик', 'Старший Инкассатор', 'Дежурный Инкассатор', 'Дежурный Инкассатор по Вооружению') OR WildMatch(POSITION, 'Инженер 1*', 'Инженер 2*', 'Инженер 3*'), POSITION,
+    IF(POSITION LIKE 'Руководитель группы*' AND [Уровень 3] = 'Дирекция Инфраструктуры', POSITION & '|' & [Уровень 3],
+    IF(POSITION LIKE 'Начальник отдела*' AND [Уровень 5] = 'Управление Эксплуатации Инженерных Систем', POSITION & '|' & [Уровень 5],
+    IF(POSITION LIKE 'Начальник отдела*' AND [Уровень 3] = 'Управление сопровождения филиальной сети', POSITION & '|' & [Уровень 3],
+    IF(POSITION LIKE 'Начальник отдела*' AND [Уровень 4] = 'Департамент Инкассации', POSITION & '|' & [Уровень 4],
+    'Нет совпадения'))))) as POSITION_KEY // Для джойна одинаковых позиций
+RESIDENT KASPI_EMP
+WHERE MATCH(POSITION, 'Водитель', 'Водитель Легкового Автомобиля', 'Водитель-Инкассатор', 'Грузчик', 'Заведующий Складом', 'Кладовщик', 'Разнорабочий', 'Специалист по Обслуживанию Зда', 'Ведущий Специалист по Обслужив', 'Электрик', 'Специалист по Подготовке Инкассаторов', 'Инкассатор-Сборщик', 'Старший Инкассатор', 'Дежурный Инкассатор', 'Дежурный Инкассатор по Вооружению') 
+   OR WildMatch(POSITION, 'Инженер 1*', 'Инженер 2*', 'Инженер 3*') 
+   OR (POSITION LIKE 'Руководитель группы*' AND [Уровень 3] = 'Дирекция Инфраструктуры') 
+   OR (POSITION LIKE 'Начальник отдела*' AND [Уровень 5] = 'Управление Эксплуатации Инженерных Систем') 
+   OR (POSITION LIKE 'Начальник отдела*' AND [Уровень 3] = 'Управление сопровождения филиальной сети') 
+   OR (POSITION LIKE 'Начальник отдела*' AND [Уровень 4] = 'Департамент Инкассации');
+
+
+
+NoConcatenate
+KASPI_EMP_NESTED:
+LOAD * 
+RESIDENT KASPI_EMP;
+INNER Join (KASPI_EMP_NESTED)
+LOAD
+    IDPOS AS ID,
+    Проф.вредность AS [Профессиональная вредность]
+FROM [lib://Folder_Kaspi_BiOT/Отчёт сотрудники для М.О/Новые позиции для отчёта.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+
+
+// Удаляем старую исходную таблицу
+DROP TABLE KASPI_EMP;
+
+
+// Переименовываем отфильтрованную таблицу в исходное название
+RENAME TABLE KASPI_EMP_FILTERED TO KASPI_EMP;
+
+
+
+LEFT JOIN(KASPI_EMP)
+LOAD * INLINE [
+    POSITION_KEY, Профессиональная вредность
+    Водитель, 'п.29. Работы, связанные с движением автотранспортных средств всех категорий'
+    Водитель Легкового Автомобиля, 'п.29. Работы, связанные с движением автотранспортных средств всех категорий'
+    Грузчик, 'п.1. Профессии и работы, связанные с подъемом и перемещением груза вручную'
+    Заведующий Складом, 'п.1. Профессии и работы, связанные с подъемом и перемещением груза вручную'
+    Кладовщик, 'п.1. Профессии и работы, связанные с подъемом и перемещением груза вручную'
+    Разнорабочий, 'п.1. Профессии и работы, связанные с подъемом и перемещением груза вручную'
+    Специалист по Обслуживанию Зда, 'п.7. Профессии и работы, связанные с региональными мышечными напряжениями, преимущественно мышц рук и плечевого пояса и с вынужденными наклонами корпуса'
+    Ведущий Специалист по Обслужив, 'п.7. Профессии и работы, связанные с региональными мышечными напряжениями, преимущественно мышц рук и плечевого пояса и с вынужденными наклонами корпуса'
+    Электрик, 'п.18. Профессии и работы, связанные с обслуживанием действующих электроустановок с напряжением 127 Вольт и выше, выполнением наладочных, монтажных работ и высоковольтных испытаний в этих электроустановках'
+    Руководитель Группы|Дирекция Инфраструктуры, 'п.18. Профессии и работы, связанные с обслуживанием действующих электроустановок с напряжением 127 Вольт и выше, выполнением наладочных, монтажных работ и высоковольтных испытаний в этих электроустановках'
+    Водитель-Инкассатор, 'п.29. Работы, связанные с движением автотранспортных средств всех категорий; п.25.Профессии и работы военизированной охраны, служб специализированной связи, аппарата инкассации, работников системы государственного банка и работников других ведомств и служб, которым разрешено ношение огнестрельного оружия и его применение, а также работникам охранных структур и ведомств без права на разрешение ношения и применения огнестрельного оружия'
+    Дежурный Инкассатор, 'п.25. Профессии и работы военизированной охраны, служб специализированной связи, аппарата инкассации, работников системы государственного банка и работников других ведомств и служб, которым разрешено ношение огнестрельного оружия и его применение, а также работникам охранных структур и ведомств без права на разрешение ношения и применения огнестрельного оружия'
+	Инкассатор-Сборщик, 'п.25. Профессии и работы военизированной охраны, служб специализированной связи, аппарата инкассации, работников системы государственного банка и работников других ведомств и служб, которым разрешено ношение огнестрельного оружия и его применение, а также работникам охранных структур и ведомств без права на разрешение ношения и применения огнестрельного оружия'
+    Старший Инкассатор, 'п.25. Профессии и работы военизированной охраны, служб специализированной связи, аппарата инкассации, работников системы государственного банка и работников других ведомств и служб, которым разрешено ношение огнестрельного оружия и его применение, а также работникам охранных структур и ведомств без права на разрешение ношения и применения огнестрельного оружия'
+	Инженер 1 Категории, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+    Инженер 2 Категории, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+    Инженер 2 Категории в г.Алматы, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+    Инженер 2 Категории в г.Актау, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 2 Категории в г.Карага, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 2 Категории в г.Костан, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 2 Категории в г.Тараз, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 2 Категории в г.Шымкен, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+    Инженер 3 Категории, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Алматы, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Астана, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Шымкен, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Тараз, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Актобе, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Атырау, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Карага, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Актау, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Жезказ, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Кокшет, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Костан, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Кызыло, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Павлод, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Петроп, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Семей, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Уральс, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Инженер 3 Категории в г.Усть-К, 'п.14. Профессии и работы связанные с работой на персональном компьютере, и/или с ремонтом, обслуживанием компьютерной и оргтехники не менее 50% времени рабочей смены'
+	Начальник Отдела|Управление Эксплуатации Инженерных Систем, 'п.18. Профессии и работы, связанные с обслуживанием действующих электроустановок с напряжением 127 Вольт и выше, выполнением наладочных, монтажных работ и высоковольтных испытаний в этих электроустановках'
+    Начальник Отдела|Управление сопровождения филиальной сети, 'п.18. Профессии и работы, связанные с обслуживанием действующих электроустановок с напряжением 127 Вольт и выше, выполнением наладочных, монтажных работ и высоковольтных испытаний в этих электроустановках'
+    Начальник Отдела|Департамент Инкассации, 'п.25. Профессии и работы военизированной охраны, служб специализированной связи, аппарата инкассации, работников системы государственного банка и работников других ведомств и служб, которым разрешено ношение огнестрельного оружия и его применение, а также работникам охранных структур и ведомств без права на разрешение ношения и применения огнестрельного оружия'
+]; // Джойним проф вредность для определнённых позиций 
+
+
+Concatenate(KASPI_EMP)
+load * Resident KASPI_EMP_NESTED;
+
+DROP TABLE KASPI_EMP_NESTED;
+
+LAST_MED:
+LOAD
+    "Табельный номер" AS STATUS_TABNO,
+    "Дата последнего медосмотра"
+FROM [lib://Folder_Kaspi_BiOT/Отчёт сотрудники для М.О/Дата последнего медосмотра.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+
+
+
+

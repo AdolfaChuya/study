@@ -1,0 +1,816 @@
+LIB CONNECT TO 'staroks (BKS)';
+
+SQL SET query_timeout = 3600;
+SQL SET exec_mem_limit = 21474836480;
+
+// ============================================================
+// ТАБЛИЦА 1: СВОДНАЯ ПО ДНЯМ (RFO_Archive_Summary)
+// ============================================================
+RFO_Archive_Summary:
+LOAD 
+   Date(date_processing)                AS [Дата поступления],
+   period_label                         AS [Период поступления],
+   depart_name                          AS [Свод Наименование подразделения],
+   depart_group                         AS [Свод Группа],
+   city                                 AS [Свод Город],
+   archive_type_name                    AS [Свод Тип архива],
+   envelopes_total                      AS [Принято конвертов],
+   fiz_clients - jur_clients            AS [Физ.клиенты], 
+   jur_clients                          AS [Юр.клиенты],
+   kd_envelopes                         AS [Касса Конверт],
+   kd_bp_total                          AS [Касса КД+БП],
+   kd_only                              AS [Кассовые документы],
+   bp_only                              AS [Безналичные переводы],
+   dop_envelopes                        AS [Доп документы Конверт],
+   dop_docs_total                       AS [Доп документы Документ];
+SQL
+WITH env AS (
+   SELECT 
+       CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT) AS id,
+       CAST(get_json_string(AFTER_BODY, '$.C_ARCH_TYPE') AS BIGINT) AS c_arch_type,
+       CAST(get_json_string(AFTER_BODY, '$.C_CASH_DOCS_ARR') AS BIGINT) AS c_cash_docs_arr,
+       CAST(get_json_string(AFTER_BODY, '$.C_ST_DEPART') AS BIGINT) AS c_st_depart,
+       CAST(get_json_string(AFTER_BODY, '$.C_DATE_PROCESSING') AS DATE) AS dt
+   FROM S01.Z_KAS_ENVELOPE
+   WHERE get_json_string(AFTER_BODY, '$.C_POINT') = '15150062740'
+     AND CAST(get_json_string(AFTER_BODY, '$.C_DATE_PROCESSING') AS DATE) >= '2025-01-01'
+),
+env_with_period AS (
+   SELECT 
+       e.*,
+       GREATEST(
+           DATE_SUB(e.dt, INTERVAL (DAYOFWEEK(e.dt) + 5) % 7 DAY),
+           DATE_SUB(e.dt, INTERVAL DAYOFMONTH(e.dt) - 1 DAY)
+       ) AS period_start,
+       DATE_ADD(
+           GREATEST(
+               DATE_SUB(e.dt, INTERVAL (DAYOFWEEK(e.dt) + 5) % 7 DAY),
+               DATE_SUB(e.dt, INTERVAL DAYOFMONTH(e.dt) - 1 DAY)
+           ),
+           INTERVAL 6 DAY
+       ) AS period_end
+   FROM env e
+),
+-- Оптимизация: единый CTE для всех collection_id вместо трёх отдельных
+env_collections AS (
+   SELECT DISTINCT c_cash_docs_arr AS collection_id
+   FROM env WHERE c_cash_docs_arr IS NOT NULL
+),
+cash AS (
+   SELECT 
+       CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) AS collection_id,
+       CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT) AS cash_id,
+       CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT) AS c_n1,
+       get_json_string(AFTER_BODY, '$.C_S2') AS c_s2
+   FROM S01.Z_KAS_UNIVERSAL_S
+   WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (SELECT collection_id FROM env_collections)
+     AND CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT) IS NOT NULL
+),
+podkrep_counts AS (
+   SELECT
+       CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) AS parent_id,
+       COUNT(*) AS podkrep_count
+   FROM S01.Z_KAS_UNIVERSAL_S
+   WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (SELECT collection_id FROM env_collections)
+     AND CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) IS NOT NULL
+   GROUP BY 1
+),
+cash_enriched AS (
+   SELECT 
+       c.collection_id,
+       c.c_s2,
+       CASE WHEN COALESCE(p.podkrep_count, 0) > 0 THEN p.podkrep_count ELSE c.c_n1 END AS c_n1_corrected
+   FROM cash c
+   LEFT JOIN podkrep_counts p ON c.cash_id = p.parent_id
+),
+cash_by_collection AS (
+   SELECT 
+       collection_id,
+       SUM(c_n1_corrected) AS kd_bp,
+       SUM(CASE WHEN c_s2 != 'Безналичные переводы' THEN c_n1_corrected ELSE 0 END) AS kd,
+       SUM(CASE WHEN c_s2 = 'Безналичные переводы' THEN c_n1_corrected ELSE 0 END) AS bp
+   FROM cash_enriched 
+   GROUP BY collection_id
+),
+dop_docs AS (
+   SELECT
+       CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) AS collection_id,
+       SUM(CAST(get_json_string(AFTER_BODY, '$.C_I1') AS BIGINT)) AS dop_doc_count
+   FROM S01.Z_KAS_UNIVERSAL_S
+   WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (
+       SELECT c_cash_docs_arr FROM env WHERE c_arch_type = 501008167835
+   )
+   GROUP BY 1
+),
+-- Оптимизация: объединённый CTE для dossier (все типы) вместо трёх отдельных
+dossier_all AS (
+   SELECT 
+       CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+       COUNT(*) AS dossier_count,
+       -- флаг юр.лиц: только тип 342666015468
+       SUM(CASE WHEN e.c_arch_type = 342666015468 THEN 1 ELSE 0 END) AS dossier_jur_count
+   FROM S01.Z_FOLDERS f
+   JOIN env e ON CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) = e.id
+       AND e.c_arch_type IN (14717996203, 14717996311, 157640900720, 256100987278, 342666015468)
+   GROUP BY 1
+),
+recl_counts AS (
+   SELECT 
+       CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+       COUNT(*) AS recl_count
+   FROM S01.Z_KAS_RECL_HIST r
+   WHERE CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) IN (
+       SELECT id FROM env WHERE c_arch_type = 24836598006
+   )
+   GROUP BY 1
+),
+address_dict AS (
+   SELECT c_place, adr
+   FROM (
+       SELECT 
+           get_json_string(AFTER_KAFKA_DATA, '$.C_PLACE') AS c_place,
+           get_json_string(AFTER_KAFKA_DATA, '$.COLLECTION_ID') AS adr,
+           ROW_NUMBER() OVER(
+               PARTITION BY get_json_string(AFTER_KAFKA_DATA, '$.COLLECTION_ID') 
+               ORDER BY ID DESC
+           ) AS rn 
+       FROM S01.Z_ADRESSES
+   ) sub
+   WHERE rn = 1
+)
+SELECT 
+   e.dt AS date_processing,
+   CONCAT(
+       DATE_FORMAT(e.period_start, '%d.%m'),
+       '-',
+       DATE_FORMAT(e.period_end, '%d.%m')
+   ) AS period_label,
+   COALESCE(get_json_string(d.AFTER_BODY, '$.C_NAME'), 'Не определено') AS depart_name,
+   COALESCE(get_json_string(zkud.AFTER_BODY, '$.C_NAME'), 'Не определено') AS depart_group,
+   COALESCE(addr.c_place, 'Не определено') AS city,
+   COALESCE(get_json_string(arch.AFTER_BODY, '$.C_NAME'), 'Не определено') AS archive_type_name,
+   SUM(CASE WHEN e.c_arch_type NOT IN (461342831869, 501008167835) THEN 1 ELSE 0 END) AS envelopes_total,
+   SUM(COALESCE(da.dossier_count, 0) + COALESCE(rc.recl_count, 0)) AS fiz_clients,
+   SUM(COALESCE(da.dossier_jur_count, 0)) AS jur_clients,
+   SUM(CASE WHEN e.c_arch_type = 461342831869 THEN 1 ELSE 0 END) AS kd_envelopes,
+   SUM(COALESCE(cbc.kd_bp, 0)) AS kd_bp_total,
+   SUM(COALESCE(cbc.kd, 0)) AS kd_only,
+   SUM(COALESCE(cbc.bp, 0)) AS bp_only,
+   SUM(CASE WHEN e.c_arch_type = 501008167835 THEN 1 ELSE 0 END) AS dop_envelopes,
+   SUM(COALESCE(dd.dop_doc_count, 0)) AS dop_docs_total
+FROM env_with_period e
+LEFT JOIN S01.Z_STRUCT_DEPART d ON d.ID = e.c_st_depart
+LEFT JOIN S01.Z_KAS_UNIVERSAL_D zkud 
+   ON get_json_string(d.AFTER_BODY, '$.C_KAS_DEPART_GROUP') = zkud.ID
+LEFT JOIN address_dict addr
+   ON get_json_string(d.AFTER_BODY, '$.C_ADDRESSES') = addr.adr
+LEFT JOIN S01.Z_KAS_UNIVERSAL_D arch ON arch.ID = e.c_arch_type
+LEFT JOIN cash_by_collection cbc ON e.c_cash_docs_arr = cbc.collection_id AND e.c_arch_type = 461342831869
+LEFT JOIN dop_docs dd ON e.c_cash_docs_arr = dd.collection_id AND e.c_arch_type = 501008167835
+LEFT JOIN dossier_all da ON da.env_id = e.id
+LEFT JOIN recl_counts rc ON rc.env_id = e.id
+GROUP BY e.dt, e.period_start, e.period_end, e.c_st_depart, 
+   COALESCE(get_json_string(d.AFTER_BODY, '$.C_NAME'), 'Не определено'),
+   COALESCE(get_json_string(zkud.AFTER_BODY, '$.C_NAME'), 'Не определено'),
+   COALESCE(addr.c_place, 'Не определено'),
+   COALESCE(get_json_string(arch.AFTER_BODY, '$.C_NAME'), 'Не определено')
+ORDER BY e.dt, depart_name, archive_type_name;
+
+// ============================================================
+// ТАБЛИЦА 2: ДОКУМЕНТЫ В ПУТИ (RFO_Archive_InTransit)
+// ============================================================
+RFO_Archive_InTransit:
+LOAD 
+    Date(date_create)                                   AS [Дата создания (в пути)],
+    period_label                                        AS [Период (в пути)],
+    dossier_recl_in_transit                             AS [В пути: Досье+Рекламации],
+    kd_in_transit                                       AS [В пути: Кассовые документы],
+    dop_in_transit                                      AS [В пути: Доп. документы];
+SQL
+WITH env AS (
+    SELECT 
+        CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT) AS id,
+        CAST(get_json_string(AFTER_BODY, '$.C_CASH_DOCS_ARR') AS BIGINT) AS c_cash_docs_arr,
+        CAST(get_json_string(AFTER_BODY, '$.C_DATE_CREATE') AS DATE) AS dt,
+        get_json_string(AFTER_BODY, '$.C_ARCH_TYPE') AS arch_type
+    FROM S01.Z_KAS_ENVELOPE
+    WHERE CAST(get_json_string(AFTER_BODY, '$.C_DATE_CREATE') AS DATE) >= '2025-01-01'
+),
+env_with_period AS (
+    SELECT 
+        e.*,
+        GREATEST(
+            DATE_SUB(e.dt, INTERVAL (DAYOFWEEK(e.dt) + 5) % 7 DAY),
+            DATE_SUB(e.dt, INTERVAL DAYOFMONTH(e.dt) - 1 DAY)
+        ) AS period_start,
+        DATE_ADD(
+            GREATEST(
+                DATE_SUB(e.dt, INTERVAL (DAYOFWEEK(e.dt) + 5) % 7 DAY),
+                DATE_SUB(e.dt, INTERVAL DAYOFMONTH(e.dt) - 1 DAY)
+            ),
+            INTERVAL 6 DAY
+        ) AS period_end
+    FROM env e
+),
+env_collections AS (
+    SELECT DISTINCT c_cash_docs_arr AS collection_id
+    FROM env 
+    WHERE c_cash_docs_arr IS NOT NULL
+      AND arch_type IN ('461342831869','501008167835')
+),
+cash AS (
+    SELECT 
+        CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) AS collection_id,
+        CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT) AS cash_id,
+        CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT) AS c_n1
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (SELECT collection_id FROM env_collections)
+      AND CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT) IS NOT NULL
+),
+podkrep_counts AS (
+    SELECT
+        CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) AS parent_id,
+        COUNT(*) AS podkrep_count
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (SELECT collection_id FROM env_collections)
+      AND CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) IS NOT NULL
+    GROUP BY 1
+),
+cash_enriched AS (
+    SELECT 
+        c.collection_id,
+        CASE WHEN COALESCE(p.podkrep_count, 0) > 0 THEN p.podkrep_count ELSE c.c_n1 END AS c_n1_corrected
+    FROM cash c
+    LEFT JOIN podkrep_counts p ON c.cash_id = p.parent_id
+),
+cash_by_collection AS (
+    SELECT collection_id, SUM(c_n1_corrected) AS kd_total
+    FROM cash_enriched 
+    GROUP BY collection_id
+),
+dop_docs AS (
+    SELECT
+        CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) AS collection_id,
+        SUM(CAST(get_json_string(AFTER_BODY, '$.C_I1') AS BIGINT)) AS dop_doc_count
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (
+        SELECT c_cash_docs_arr FROM env WHERE arch_type = '501008167835'
+    )
+    GROUP BY 1
+),
+-- Оптимизация: объединённый dossier + recl в один CTE
+dossier_recl_all AS (
+    SELECT 
+        env_id,
+        SUM(dossier_count) AS dossier_count,
+        SUM(recl_count) AS recl_count
+    FROM (
+        SELECT 
+            CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+            COUNT(*) AS dossier_count,
+            0 AS recl_count
+        FROM S01.Z_FOLDERS f
+        WHERE CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) IN (
+            SELECT id FROM env WHERE arch_type IN ('14717996203','14717996311','157640900720','342666015468','256100987278')
+        )
+        GROUP BY 1
+        UNION ALL
+        SELECT 
+            CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+            0 AS dossier_count,
+            COUNT(*) AS recl_count
+        FROM S01.Z_KAS_RECL_HIST r
+        WHERE CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) IN (
+            SELECT id FROM env WHERE arch_type = '24836598006'
+        )
+        GROUP BY 1
+    ) combined
+    GROUP BY env_id
+)
+SELECT 
+    e.dt AS date_create,
+    CONCAT(
+        DATE_FORMAT(e.period_start, '%d.%m'),
+        '-',
+        DATE_FORMAT(e.period_end, '%d.%m')
+    ) AS period_label,
+    SUM(COALESCE(dra.dossier_count, 0) + COALESCE(dra.recl_count, 0)) AS dossier_recl_in_transit,
+    SUM(COALESCE(cbc.kd_total, 0)) AS kd_in_transit,
+    SUM(COALESCE(dd.dop_doc_count, 0)) AS dop_in_transit
+FROM env_with_period e
+LEFT JOIN cash_by_collection cbc ON e.c_cash_docs_arr = cbc.collection_id AND e.arch_type = '461342831869'
+LEFT JOIN dop_docs dd ON e.c_cash_docs_arr = dd.collection_id AND e.arch_type = '501008167835'
+LEFT JOIN dossier_recl_all dra ON dra.env_id = e.id
+GROUP BY e.dt, e.period_start, e.period_end
+ORDER BY e.dt;
+
+// ============================================================
+// ТАБЛИЦА 3: КОРОБКИ (RFO_Archive_Boxes)
+// ============================================================
+RFO_Archive_Boxes:
+LOAD
+   Date(date_processing)                AS [Дата поступления],
+   city_clean                           AS [Свод Город Коробки],
+   depart_name                          AS [Подразделение отправителя],
+   boxes_count                          AS [Кол-во коробок],
+   weight_sum                           AS [Контрольный вес],
+   weight_kazpost_sum                   AS [Первичный вес],
+   'ЕМС'                                AS [Тип посылки];
+SQL
+WITH box AS (
+    SELECT 
+        GET_JSON_STRING(JSON_DATA, '$.barcode')                                       AS barcode,
+        GET_JSON_STRING(JSON_DATA, '$.senderName')                                    AS sender_name,
+        CAST(GET_JSON_STRING(JSON_DATA, '$.sendDate')     AS DATETIME)                 AS send_date,
+        CAST(GET_JSON_STRING(JSON_DATA, '$.receiveDate')  AS DATE)                     AS receive_date,
+        CAST(GET_JSON_STRING(JSON_DATA, '$.weight')       AS DECIMAL(20,2))            AS weight,
+        CAST(GET_JSON_STRING(JSON_DATA, '$.weightKazPost') AS DECIMAL(20,2))           AS weight_kazpost,
+        CAST(GET_JSON_STRING(JSON_DATA, '$.id')           AS BIGINT)                   AS event_id
+    FROM S0266.KZ_ARCHIVE_BOX_EVENT_PROD
+    WHERE GET_JSON_STRING(JSON_DATA, '$.boxStatus') = 'Принято в ЦА'
+      AND GET_JSON_STRING(JSON_DATA, '$.receiveDate') IS NOT NULL
+      AND GET_JSON_STRING(JSON_DATA, '$.receiveDate') != ''
+),
+
+box_dedup AS (
+    SELECT barcode, sender_name, send_date, receive_date, weight, weight_kazpost
+    FROM (
+        SELECT b.*,
+               ROW_NUMBER() OVER (
+                   PARTITION BY barcode 
+                   ORDER BY send_date DESC, event_id DESC
+               ) AS rn
+        FROM box b
+    ) t
+    WHERE rn = 1
+),
+
+motiv_depart AS (
+    SELECT 
+        e.name  AS emp_name,
+        dep.name AS depart_name,
+        ROW_NUMBER() OVER (
+            PARTITION BY e.name
+            ORDER BY ABS(TIMESTAMPDIFF(SECOND, d.createdate, b.send_date))
+        ) AS rn
+    FROM S0108.DOCUMENTS d
+    JOIN S0108.EMPLOYER   e   ON d.id_author     = e.id
+    JOIN S0108.DEPARTMENT dep ON d.id_department = dep.id
+    JOIN box_dedup        b   ON e.name          = b.sender_name
+    WHERE d.isdeleted = 0
+      AND d.createdate <= b.send_date
+),
+
+s01_depart AS (
+    SELECT 
+        emp_name_full,
+        depart_name,
+        addr_id
+    FROM (
+        SELECT 
+            GET_JSON_STRING(u.AFTER_BODY, '$.C_NAME')      AS emp_name_full,
+            GET_JSON_STRING(d.AFTER_BODY, '$.C_NAME')      AS depart_name,
+            GET_JSON_STRING(d.AFTER_BODY, '$.C_ADDRESSES') AS addr_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY GET_JSON_STRING(u.AFTER_BODY, '$.C_NAME')
+                ORDER BY u.S$CHANGE_DATE DESC
+            ) AS rn
+        FROM S01.Z_USER u
+        LEFT JOIN S01.Z_STRUCT_DEPART d 
+            ON CAST(GET_JSON_STRING(u.AFTER_BODY, '$.C_ST_DEPART') AS BIGINT) = d.ID
+        WHERE GET_JSON_STRING(u.AFTER_BODY, '$.C_NAME') IS NOT NULL
+    ) t
+    WHERE rn = 1
+),
+
+addr_city AS (
+    SELECT 
+        GET_JSON_STRING(AFTER_KAFKA_DATA, '$.COLLECTION_ID') AS addr_id,
+        GET_JSON_STRING(AFTER_KAFKA_DATA, '$.C_PLACE')       AS city,
+        ROW_NUMBER() OVER (
+            PARTITION BY GET_JSON_STRING(AFTER_KAFKA_DATA, '$.COLLECTION_ID') 
+            ORDER BY ID DESC
+        ) AS rn
+    FROM S01.Z_ADRESSES
+),
+
+s01_result AS (
+    SELECT 
+        b.sender_name AS emp_name,
+        sd.depart_name,
+        COALESCE(
+            ac.city, 
+            REGEXP_REPLACE(SPLIT_PART(sd.depart_name, ',', 1), '^(Филиал |Отделение )', '')
+        ) AS city_clean,
+        ROW_NUMBER() OVER (PARTITION BY b.sender_name ORDER BY sd.depart_name) AS rn
+    FROM (SELECT DISTINCT sender_name FROM box_dedup) b
+    JOIN s01_depart sd 
+        ON sd.emp_name_full LIKE CONCAT(b.sender_name, '%')
+       AND (sd.emp_name_full = b.sender_name
+            OR SUBSTRING(sd.emp_name_full, LENGTH(b.sender_name) + 1) REGEXP '^(\\([^)]*\\))*$')
+    LEFT JOIN addr_city ac ON sd.addr_id = ac.addr_id AND ac.rn = 1
+),
+
+motiv_result AS (
+    SELECT 
+        emp_name,
+        depart_name,
+        REGEXP_REPLACE(SPLIT_PART(depart_name, ',', 1), '^(Филиал |Отделение )', '') AS city_clean
+    FROM motiv_depart
+    WHERE rn = 1
+),
+
+final_depart AS (
+    SELECT emp_name, depart_name, city_clean
+    FROM (
+        SELECT emp_name, depart_name, city_clean,
+               ROW_NUMBER() OVER (PARTITION BY emp_name ORDER BY src, depart_name) AS rn2
+        FROM (
+            SELECT emp_name, depart_name, city_clean, 1 AS src 
+            FROM s01_result WHERE rn = 1
+            UNION ALL
+            SELECT m.emp_name, m.depart_name, m.city_clean, 2 AS src
+            FROM motiv_result m
+            WHERE m.emp_name NOT IN (SELECT emp_name FROM s01_result WHERE rn = 1)
+        ) u
+    ) t
+    WHERE rn2 = 1
+)
+
+SELECT
+    b.receive_date               AS date_processing,
+    fd.city_clean                AS city_clean,
+    fd.depart_name               AS depart_name,
+    COUNT(DISTINCT b.barcode)    AS boxes_count,
+    SUM(b.weight)                AS weight_sum,
+    SUM(b.weight_kazpost)        AS weight_kazpost_sum
+FROM box_dedup b
+LEFT JOIN final_depart fd ON b.sender_name = fd.emp_name
+GROUP BY 
+    b.receive_date,
+    fd.city_clean,
+    fd.depart_name
+ORDER BY date_processing DESC;
+
+// ============================================================
+// КГПО посылки (Excel)
+// ============================================================
+CONCATENATE (RFO_Archive_Boxes)
+LOAD
+   Date("Дата поступления")             AS [Дата поступления],
+   Город                                AS [Свод Город Коробки],
+   "Подразделение отправителя"          AS [Подразделение отправителя],
+   "Кол-во посылок"                     AS [Кол-во коробок],
+   Num#(Replace("Контрольный вес", ',', '.'), '0.00') AS [Контрольный вес],
+   0                                     AS [Первичный вес],
+   "Тип посылки"                        AS [Тип посылки]
+FROM [lib://Folder_Kaspi_BiOT/Kaspi Qlik sense/Центральный Архив QS/Посылки КГПО_Алматы.xlsx]
+(ooxml, embedded labels, table is Данные);
+
+// ============================================================
+// ТАБЛИЦА 4: ДЕТАЛИЗАЦИЯ ПО КОНВЕРТАМ (ABC_Test_Data)
+// ============================================================
+ABC_Test_Data:
+LOAD 
+    [Номер конверта],
+    [Дата создания конверта],
+    [Дата сшива],
+    [Принят в ЦА],
+    [Количество документов в сшиве],
+    [Код сшива],
+    [Наименование сшива],
+    [ФИО менеджера],
+    [Наименование подразделения],
+    [Код подразделения],
+    [Группа],
+    [Город],
+    [Кол-во вложенных досье/рекламаций],
+    [Тип архива],
+    [Доп. документы],
+    c_cash_docs_arr,
+    archive_type,
+    dop_doc_count,
+    dossier_count,
+    recl_count,
+    podkrep_count,
+    is_sheet
+;
+LOAD
+    archive_type,
+    c_cash_docs_arr,
+    dop_doc_count,
+    dossier_count,
+    recl_count,
+    podkrep_count,
+    is_sheet,
+    c_date_create AS [Дата создания конверта],
+    c_date_processing AS [Принят в ЦА],
+    c_num AS [Номер конверта],
+    c_n1_corrected AS [Количество документов в сшиве],
+    Date(c_d1) AS [Дата сшива],
+    c_s1 AS [Код сшива],
+    c_s2 AS [Наименование сшива],
+    user_name AS [ФИО менеджера],
+    depart_name AS [Наименование подразделения],
+    c_code AS [Код подразделения],
+    d_group AS [Группа],
+    c_place AS [Город],
+    dossier_recl_count AS [Кол-во вложенных досье/рекламаций],
+    status_history_text AS [История состояний],
+    archive_type AS [Тип архива],
+    dop_doc_count AS [Доп. документы];
+SQL
+WITH env AS (
+    SELECT 
+        CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT)                AS id,
+        CAST(get_json_string(AFTER_BODY, '$.C_ARCH_TYPE') AS BIGINT)       AS c_arch_type,
+        CAST(get_json_string(AFTER_BODY, '$.C_CASH_DOCS_ARR') AS BIGINT)   AS c_cash_docs_arr,
+        CAST(get_json_string(AFTER_BODY, '$.C_CREATE_USER') AS BIGINT)     AS c_create_user,
+        CAST(get_json_string(AFTER_BODY, '$.C_DATE_CREATE') AS DATETIME)   AS c_date_create,
+        CAST(get_json_string(AFTER_BODY, '$.C_DATE_PROCESSING') AS DATETIME) AS c_date_processing,
+        CAST(get_json_string(AFTER_BODY, '$.C_HISTORY_POINT') AS BIGINT)   AS c_history_point,
+        CAST(get_json_string(AFTER_BODY, '$.C_NUM') AS VARCHAR(50))        AS c_num,
+        CAST(get_json_string(AFTER_BODY, '$.C_POINT') AS BIGINT)           AS c_point,
+        CAST(get_json_string(AFTER_BODY, '$.C_ST_DEPART') AS BIGINT)       AS c_st_depart,
+        get_json_string(AFTER_BODY, '$.SN')                                AS sn,
+        get_json_string(AFTER_BODY, '$.SU')                                AS su
+    FROM S01.Z_KAS_ENVELOPE
+    WHERE get_json_string(AFTER_BODY, '$.C_POINT') = '15150062740'
+),
+env_collections AS (
+    SELECT DISTINCT c_cash_docs_arr AS collection_id
+    FROM env WHERE c_cash_docs_arr IS NOT NULL
+),
+cash AS (
+    SELECT 
+        CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT)     AS collection_id,
+        CAST(get_json_string(AFTER_BODY, '$.ID') AS BIGINT)                AS cash_id,
+        CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT)              AS c_n1,
+        CAST(get_json_string(AFTER_BODY, '$.C_D1') AS DATETIME)            AS c_d1,
+        CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT)              AS c_r1,
+        CAST(get_json_string(AFTER_BODY, '$.SN') AS BIGINT)                AS cash_sn,
+        CAST(get_json_string(AFTER_BODY, '$.SU') AS BIGINT)                AS cash_su,
+        get_json_string(AFTER_BODY, '$.C_S1')                              AS c_s1,
+        get_json_string(AFTER_BODY, '$.C_S2')                              AS c_s2,
+        get_json_string(AFTER_BODY, '$.C_S3')                              AS c_s3,
+        get_json_string(AFTER_BODY, '$.C_S4')                              AS c_s4
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (
+        SELECT collection_id FROM env_collections
+    )
+    AND CAST(get_json_string(AFTER_BODY, '$.C_N1') AS BIGINT) IS NOT NULL
+),
+podkrep_counts AS (
+    SELECT
+        CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) AS parent_id,
+        COUNT(*) AS podkrep_count
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (
+        SELECT collection_id FROM env_collections
+    )
+    AND CAST(get_json_string(AFTER_BODY, '$.C_R1') AS BIGINT) IS NOT NULL
+    GROUP BY 1
+),
+dop_docs AS (
+    SELECT
+        CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) AS collection_id,
+        SUM(CAST(get_json_string(AFTER_BODY, '$.C_I1') AS BIGINT))    AS dop_doc_count
+    FROM S01.Z_KAS_UNIVERSAL_S
+    WHERE CAST(get_json_string(AFTER_BODY, '$.COLLECTION_ID') AS BIGINT) IN (
+        SELECT c_cash_docs_arr FROM env 
+        WHERE c_arch_type = 501008167835
+    )
+    GROUP BY 1
+),
+-- Оптимизация: объединённый dossier (все типы) + recl
+dossier_recl_all AS (
+    SELECT 
+        env_id,
+        SUM(dossier_count) AS dossier_count,
+        SUM(recl_count) AS recl_count
+    FROM (
+        SELECT 
+            CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+            COUNT(*) AS dossier_count,
+            0 AS recl_count
+        FROM S01.Z_FOLDERS f
+        WHERE CAST(get_json_string(f.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) IN (
+            SELECT id FROM env 
+            WHERE c_arch_type IN (14717996203, 14717996311, 157640900720, 342666015468, 256100987278)
+        )
+        GROUP BY 1
+        UNION ALL
+        SELECT 
+            CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) AS env_id,
+            0 AS dossier_count,
+            COUNT(*) AS recl_count
+        FROM S01.Z_KAS_RECL_HIST r
+        WHERE CAST(get_json_string(r.AFTER_BODY, '$.C_KAS_ENVELOPE') AS BIGINT) IN (
+            SELECT id FROM env WHERE c_arch_type = 24836598006
+        )
+        GROUP BY 1
+    ) combined
+    GROUP BY env_id
+),
+status_history AS (
+    SELECT 
+        collection_id,
+        GROUP_CONCAT(
+            CONCAT(
+                CAST(get_json_string(after_body, '$.C_POINT') AS VARCHAR),
+                ' (',
+                get_json_string(after_body, '$.C_POINT_TIME'),
+                ')'
+            ) ORDER BY CAST(get_json_string(after_body, '$.C_POINT_TIME') AS DATETIME) SEPARATOR ' -> '
+        ) AS status_history_text
+    FROM S01.Z_KAS_POINT_HIST
+    WHERE collection_id IN (
+        SELECT c_history_point FROM env WHERE c_history_point IS NOT NULL
+    )
+    GROUP BY collection_id
+),
+address_dict AS (
+    SELECT c_place, adr
+    FROM (
+        SELECT 
+            get_json_string(AFTER_KAFKA_DATA, '$.C_PLACE') AS c_place,
+            get_json_string(AFTER_KAFKA_DATA, '$.COLLECTION_ID') AS adr,
+            ROW_NUMBER() OVER(
+                PARTITION BY get_json_string(AFTER_KAFKA_DATA, '$.COLLECTION_ID') 
+                ORDER BY ID DESC
+            ) AS rn 
+        FROM S01.Z_ADRESSES
+    ) sub
+    WHERE rn = 1
+),
+env_enriched AS (
+    SELECT 
+        env.id,
+        env.c_arch_type,
+        env.c_cash_docs_arr,
+        env.c_create_user,
+        env.c_date_create,
+        env.c_date_processing,
+        env.c_history_point,
+        env.c_num,
+        env.c_st_depart,
+        env.sn,
+        env.su,
+        get_json_string(arch.AFTER_BODY, '$.C_NAME') AS archive_type,
+        get_json_string(u.AFTER_BODY, '$.C_NAME') AS user_name,
+        get_json_string(d.AFTER_BODY, '$.C_NAME') AS depart_name,
+        get_json_string(d.AFTER_BODY, '$.C_CODE') AS c_code,
+        get_json_string(zkud.AFTER_BODY, '$.C_NAME') AS d_group,
+        addr.c_place,
+        dra.dossier_count,
+        dra.recl_count,
+        COALESCE(dra.dossier_count, 0) + COALESCE(dra.recl_count, 0) AS dossier_recl_count,
+        sh.status_history_text,
+        COALESCE(dd.dop_doc_count, 0) AS dop_doc_count
+    FROM env
+    LEFT JOIN S01.Z_KAS_UNIVERSAL_D arch ON arch.ID = env.c_arch_type
+    LEFT JOIN S01.Z_USER u ON u.ID = env.c_create_user
+    LEFT JOIN S01.Z_STRUCT_DEPART d ON d.ID = env.c_st_depart
+    LEFT JOIN S01.Z_KAS_UNIVERSAL_D zkud 
+        ON get_json_string(d.AFTER_BODY, '$.C_KAS_DEPART_GROUP') = zkud.ID
+    LEFT JOIN address_dict addr
+        ON get_json_string(d.AFTER_BODY, '$.C_ADDRESSES') = addr.adr
+    LEFT JOIN dossier_recl_all dra ON dra.env_id = env.id
+    LEFT JOIN status_history sh ON sh.collection_id = env.c_history_point
+    LEFT JOIN dop_docs dd ON dd.collection_id = env.c_cash_docs_arr
+)
+SELECT 
+    ee.id,
+    ee.c_arch_type,
+    ee.archive_type,
+    ee.c_cash_docs_arr,
+    ee.c_num,
+    ee.c_date_create,
+    ee.c_date_processing,
+    ee.sn,
+    ee.su,
+    ee.user_name,
+    ee.depart_name,
+    ee.c_code,
+    ee.d_group,
+    ee.c_place,
+    COALESCE(ee.dossier_count, 0) AS dossier_count,
+    COALESCE(ee.recl_count, 0) AS recl_count,
+    ee.dossier_recl_count,
+    ee.status_history_text,
+    ee.dop_doc_count,
+    c.cash_id,
+    c.c_n1,
+    c.c_d1,
+    c.c_r1,
+    c.c_s1,
+    c.c_s2,
+    c.c_s3,
+    c.c_s4,
+    COALESCE(p.podkrep_count, 0) AS podkrep_count,
+    CASE WHEN COALESCE(p.podkrep_count, 0) > 0 THEN p.podkrep_count ELSE c.c_n1 END AS c_n1_corrected,
+    CASE WHEN c.c_n1 IS NOT NULL AND c.c_r1 IS NULL THEN 1 ELSE 0 END AS is_sheet
+FROM env_enriched ee
+LEFT JOIN cash c ON ee.c_cash_docs_arr = c.collection_id
+LEFT JOIN podkrep_counts p ON c.cash_id = p.parent_id
+ORDER BY ee.archive_type, ee.c_num;
+
+// ============================================================
+// ТАБЛИЦА 5: СЫРЫЕ ДАННЫЕ КОРОБОК (BOX_DATA) — оптимизировано
+// ============================================================
+BOX_DATA:
+SQL
+SELECT 
+    BARCODE,
+    WEIGHTKAZPOST,
+    WEIGHT,
+    RECEIVEDATE,
+    GET_JSON_STRING(JSON_DATA, '$.action') AS action,
+    GET_JSON_STRING(JSON_DATA, '$.barcode') AS json_barcode,
+    GET_JSON_STRING(JSON_DATA, '$.boxStatus') AS boxStatus,
+    GET_JSON_STRING(JSON_DATA, '$.createdDate') AS createdDate,
+    GET_JSON_STRING(JSON_DATA, '$.eventType') AS eventType,
+    GET_JSON_STRING(JSON_DATA, '$.id') AS event_id,
+    GET_JSON_STRING(JSON_DATA, '$.login') AS login,
+    GET_JSON_STRING(JSON_DATA, '$.messageId') AS messageId,
+    GET_JSON_STRING(JSON_DATA, '$.receiveDate') AS receiveDate,
+    GET_JSON_STRING(JSON_DATA, '$.recipientAddress') AS recipientAddress,
+    GET_JSON_STRING(JSON_DATA, '$.recipientName') AS recipientName,
+    GET_JSON_STRING(JSON_DATA, '$.recipientPostcode') AS recipientPostcode,
+    GET_JSON_STRING(JSON_DATA, '$.sendDate') AS sendDate,
+    GET_JSON_STRING(JSON_DATA, '$.senderAddress') AS senderAddress,
+    GET_JSON_STRING(JSON_DATA, '$.senderName') AS senderName,
+    GET_JSON_STRING(JSON_DATA, '$.senderPostcode') AS senderPostcode,
+    GET_JSON_STRING(JSON_DATA, '$.timestamp') AS timestamp,
+    GET_JSON_STRING(JSON_DATA, '$.weight') AS json_weight,
+    GET_JSON_STRING(JSON_DATA, '$.weightKazPost') AS json_weightKazPost,
+    S$KAFKA_TIMESTAMP,
+    S$CHANGE_DATE
+FROM S0266.KZ_ARCHIVE_BOX_EVENT_PROD
+-- Оптимизация: фильтр по статусу, чтобы не тащить мусорные события
+WHERE GET_JSON_STRING(JSON_DATA, '$.boxStatus') = 'Принято в ЦА'
+ORDER BY S$CHANGE_DATE DESC;
+
+// ============================================================
+// 4. MASTER CALENDAR (один фильтр на все таблицы)
+// ============================================================
+
+LEFT JOIN (RFO_Archive_Summary)
+LOAD DISTINCT
+   [Дата поступления],
+   Date(Floor([Дата поступления])) as Date
+RESIDENT RFO_Archive_Summary;
+
+LEFT JOIN (RFO_Archive_InTransit)
+LOAD DISTINCT
+   [Дата создания (в пути)],
+   Date(Floor([Дата создания (в пути)])) as Date
+RESIDENT RFO_Archive_InTransit;
+
+LEFT JOIN (ABC_Test_Data)
+LOAD DISTINCT
+   [Принят в ЦА],
+   Date(Floor([Принят в ЦА])) as Date
+RESIDENT ABC_Test_Data;
+
+// --- 4.2 Находим общий min/max по всем трём таблицам ---
+MinMaxDates:
+LOAD Num(Min(Date)) as MinDate, Num(Max(Date)) as MaxDate
+RESIDENT RFO_Archive_Summary;
+
+CONCATENATE(MinMaxDates)
+LOAD Num(Min(Date)) as MinDate, Num(Max(Date)) as MaxDate
+RESIDENT RFO_Archive_InTransit;
+
+CONCATENATE(MinMaxDates)
+LOAD Num(Min(Date)) as MinDate, Num(Max(Date)) as MaxDate
+RESIDENT ABC_Test_Data;
+
+CalendarBounds:
+LOAD Num(Min(MinDate)) as GlobalMinDate, Num(Max(MaxDate)) as GlobalMaxDate
+RESIDENT MinMaxDates;
+
+LET vMinDate = Peek('GlobalMinDate', 0, 'CalendarBounds');
+LET vMaxDate = Peek('GlobalMaxDate', 0, 'CalendarBounds');
+
+DROP TABLES MinMaxDates, CalendarBounds;
+
+Calendar:
+LOAD
+   Date($(vMinDate) + IterNo() - 1) as Date,
+   Year(Date($(vMinDate) + IterNo() - 1)) as [Календарь Год],
+   Month(Date($(vMinDate) + IterNo() - 1)) as [Календарь Месяц],
+   Date(MonthStart(Date($(vMinDate) + IterNo() - 1)), 'YYYY-MM') as [Календарь Год-Месяц],
+   'Q' & Ceil(Month(Date($(vMinDate) + IterNo() - 1))/3) as [Календарь Квартал],
+   Day(Date($(vMinDate) + IterNo() - 1)) as [Календарь День],
+   Week(Date($(vMinDate) + IterNo() - 1)) as [Календарь Неделя],
+   WeekDay(Date($(vMinDate) + IterNo() - 1)) as [Календарь День недели],
+   If(Month(Date($(vMinDate) + IterNo() - 1)) >= 1 and Month(Date($(vMinDate) + IterNo() - 1)) <= 3, 1,
+      If(Month(Date($(vMinDate) + IterNo() - 1)) >= 4 and Month(Date($(vMinDate) + IterNo() - 1)) <= 6, 2,
+      If(Month(Date($(vMinDate) + IterNo() - 1)) >= 7 and Month(Date($(vMinDate) + IterNo() - 1)) <= 9, 3, 4))) as [Календарь Номер квартала]
+AUTOGENERATE 1
+WHILE $(vMinDate) + IterNo() - 1 <= $(vMaxDate);
+
+
+SET vMinDate=;
+SET vMaxDate=;

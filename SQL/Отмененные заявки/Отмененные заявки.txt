@@ -1,0 +1,1269 @@
+LIB CONNECT TO 'BKS_dev OLEDB';
+
+[CALENDAR_RAW]:
+Load
+    Year(DT) 		    AS [Год],
+    MonthName(DT) 		AS [Название месяца],
+    date(DT)		    AS [DT],
+    if(year(today())=Year(DT),1,0) AS [ТекущийГод],
+    If(Year(DT) = Year(Today()) AND Month(DT) = Month(Today()), 1, 0) AS [ТекущийМесяц];
+Load
+    Date(Date('01.01.2022') + IterNo() - 1) as DT
+AutoGenerate 1 While Date('01.01.2022') + IterNo() -1 <= Date(Date('01.01.2027') - 1);
+
+CALENDAR:
+Load
+    [Год],
+    [Название месяца],
+    [DT]                AS [DT_Ключ], 
+    [ТекущийГод],
+    [ТекущийМесяц],
+
+    Date(MonthStart([DT]), 'MMM YYYY') AS [Месяц Год],
+    
+    'Q' & Ceil(Month([DT]) / 3) AS [Квартал],
+
+    QuarterName([DT])   AS [Квартал Название]
+
+Resident CALENDAR_RAW;
+
+DROP Table CALENDAR_RAW;
+
+
+KazakhCharMapping:
+MAPPING LOAD * INLINE [
+    OldChar, NewChar
+    Ќ, Қ
+    ќ, қ
+    ў, ұ
+    Ў, Ұ
+    Ґ, Ө
+    ґ, ө
+    ї, ү
+    Ї, Ү
+    Ј, Ә
+    ј, ә
+    є, ғ
+    Є, Ғ
+    ћ, һ
+    Ћ, Һ
+    ѕ, ң
+    Ѕ, Ң
+];
+
+
+Map_StageByName:
+MAPPING LOAD
+    "ФИО S0008.S_STAFFLIST2", 
+    "Этап рассмотрения"       
+FROM [lib://AttachedFiles/Справочник по этапам расс.xlsx]
+(ooxml, embedded labels, table is Лист1);
+
+
+[BUDGET_PAID]:
+LOAD 
+     /*keys*/
+     date(DT) as [DT_Ключ],
+     /*****/
+     
+     HOZED                  AS [КХЕ инициатора],
+     HOZED_BUDGET           AS [КХЕ бюджета (ГБ)],
+     HOZED_ACC              AS [КХЕ филиала],
+     HOZED_FIL_DBU          AS [КХЕ филиала ДБУ],
+     HOZED_BUDGET_DBU       AS [КХЕ бюджета ДБУ], 
+     CODE_EXPENSE           AS [Код затрат],
+     NAME_EXPENSE           AS [Наименование кода затрат],
+     OS_CODE                AS [Код ОС],
+     OS_NAME                AS [Наименование ОС],
+     TYPE_EXPENSE           AS [Вид затрат],
+     ''			            AS [План],
+     AMOUNT                 AS [Факт],
+     AMOUNT_WITHNDS         AS [Факт с НДС],
+     ''		                AS [Тип документы],
+     ''                     AS [id заявки],
+     R_NUM                  AS [Номер заявки],
+     DATE_REQ               AS [Дата заявки],
+     ''                     AS [Поставщик],
+     ''                     AS [Назначение платежа],
+     SUMMA_PLAT             AS [Сумма заявки],
+     SUMMA_NDS              AS [Сумма НДС],
+     ''                     AS [Валюта],
+     'Оплачено'                     AS [Статус заявки],
+     ''              		AS [Ссылка на счет],
+     ''		                AS [В бюджете],
+     ''  		            AS [В бюджете(код)],
+     ''	                    AS [С/без НДС],
+     ''                     AS [Комментарий],
+     ''                     AS [Период оплат],       
+     ''                     AS [Тип платежа],
+     ''                     AS [Проект/Продукт],
+     '' as [Причина возврата],
+     '' as [Причины возврата список],
+     '' as [Дата/время возврата],
+     '' as [Кто вернул],
+     '' as [Из статуса],
+     '' as [В статус],
+     '' as [Время отклонения],
+     '' as [Табельный инициатора],
+	 '' as [Должность инициатора],
+     '' as [Статус инициатора],
+     '' as [Должность вернувшего],
+     '' as [Статус вернувшего],
+     '' as [Этап рассмотрения],
+     '' as [Базовая Категория],
+     '' as [Категория причин],
+     '' as [Общая причина],
+     '' as [Этап]
+     ;
+select dd.*,
+       STANDARD_HASH(STANDARD_HASH(dt, 'MD5') ||
+                     STANDARD_HASH(hozed, 'MD5') ||                  
+                     STANDARD_HASH(hozed_budget, 'MD5') ||
+                     //STANDARD_HASH(hozed_budgetdbu_name, 'MD5') ||
+                     STANDARD_HASH(hozed_acc, 'MD5') ||
+                     STANDARD_HASH(hozed_fil_dbu, 'MD5') ||
+                     STANDARD_HASH(hozed_budget_dbu, 'MD5') ||
+                     STANDARD_HASH(code_expense, 'MD5') ||
+                     STANDARD_HASH(name_expense, 'MD5') ||
+                     STANDARD_HASH(os_code, 'MD5') ||
+                     STANDARD_HASH(type_expense, 'MD5') ||
+                     STANDARD_HASH(amount_plan, 'MD5') ||
+                     STANDARD_HASH(amount, 'MD5') ||
+                     STANDARD_HASH(confirms, 'MD5') ||
+                     STANDARD_HASH(r_id, 'MD5') ||
+                     STANDARD_HASH(r_num, 'MD5') ||
+                     STANDARD_HASH(date_req, 'MD5') ||
+                     STANDARD_HASH(supplier, 'MD5') ||
+                     STANDARD_HASH(summa_plat, 'MD5') ||
+                     STANDARD_HASH(summa_nds, 'MD5') ||
+                     STANDARD_HASH(cur, 'MD5') ||
+                     STANDARD_HASH(in_budget_code, 'MD5')||
+                     STANDARD_HASH(c_nds, 'MD5') , 'MD5') as MD5
+  from (select dt,
+               hozedid4svod ||' '||h6.c_hoz hozed4svod,
+               hozedid4svod hozedid4svod_code,
+               h6.c_hoz     hozedid4svod_name,
+               r_kxe         hozed,        
+               r_kxe_budget  hozed_budget,
+               r_kxe_remap    hozed_acc,
+               c_kxe          hozed_fil_dbu,
+               coalesce(c_kxe_remap,r_kxe_budget) hozed_budget_dbu,
+               case when instr(code_expense, '/')>0 then regexp_substr(code_expense,'(\d+)') else code_expense end code_expense,
+               name_expense,  
+               os_code,
+               os_name,
+               case when code_expense='2850'     then 'Capex'
+                    when code_expense like '2%'  then 'Opex'
+                    when code_expense like '1%'  then 'Capex'
+               end type_expense,
+               decode(d.is_fact, 0, amount_withnds, 0) amount_plan,
+               amount_withnds,
+               amount_withnds-summa_nds  amount,
+               confirms,
+               r_id,
+               r_num,
+               date_req,
+               supplier,
+               nazn,
+               case when nazn like '%ЛС%' then substr(nazn, instr(nazn, 'ЛС')) end ls2,
+               summa_plat,
+               summa_nds,      /*сумма ндс*/
+               cur,          
+               file_path,
+               case when in_budget_code='1' then 'В бюджете'
+                    when in_budget_code='0' then 'Вне бюджета' end in_budget,
+               in_budget_code,
+               c_nds,
+               c_comment,
+               c_return_reason,
+               c_pay_cond,       
+               pay_type,
+               c_problem,
+               state
+          from (select /*+ parallel(64)*/
+                       distinct
+                       t.dt,
+                       case when h5.c_code is not null and t.pay_type_id=8608627778 then t.r_kxe_budget
+                            when t.r_kxe <> '9999' and h5.c_code not in (501, 502, 503, 902, 1160, 1800,1300,1310,1320,1140,1340,1350,1360,1370,1250,1270,1240,1245,1120,1330)
+                            then t.r_kxe_budget
+                            else coalesce(h5.c_code,  t.r_kxe_budget)
+                       end hozedid4svod,
+                       t.r_kxe,
+                       t.r_kxe_budget,
+                       t.r_kxe_remap,
+                       coalesce(h4.c_code,t.r_kxe_remap) c_kxe,       /*кхе фил дбу*/
+                       h5.c_code           c_kxe_remap,  /*кхе бюдж дбу*/
+                       a.code_expense,
+                       a.name_expense,
+                       a.os_code,
+                       a.os_name,
+                       a.amount_withnds,
+                       'Счета на оплату'   confirms,
+                       1                   is_fact,
+                       t.r_id,
+                       t.r_num,
+                       t.date_req,
+                       t.supplier,
+                       t.nazn,
+                       t.summa_plat,
+                       case when t.c_nds = 1 then a.amount_withnds*12/112 else 0 end  summa_nds,      /*сумма ндс*/
+                       t.cur,
+                       -- null              state_id,
+                       t.file_path,
+                       t.in_budget_code,
+                       t.c_nds,
+                       t.c_comment,
+                       t.c_return_reason,
+                       t.c_pay_cond,
+                       t.pay_type,
+                       t.c_problem,
+                       t.state
+                       
+                  from bi.f$kas_request_pay t
+                  
+                  left join bi.f$kas_request_pay2850 a
+                    on a.r_id = t.r_id
+                   and a.code_expense = t.code_expense 
+                  
+                  left join s06.z#hozed h4 /*КХЕ филиала ДБУ*/
+                    on a.c_kxe = h4.id
+
+                  left join s06.z#hozed h5 /*КХЕ бюджета ДБУ*/
+                    on a.c_kxe_remap = h5.id 
+                     
+                 where 1=1
+                   and 
+                        t.r_kxe_budget in (1300,1310,1320,1140,1340,1350,1360,1370)
+                        and state = 'Оплачено'
+                        and date_req > TO_DATE('01/01/2024', 'DD/MM/YYYY')
+
+                 union all /* ИБСО/справочники/KAS. Бюджет банка*/
+
+                 SELECT to_date(mm||c_year, 'DD.MM.YYYY') dt,
+                        hozed          hozedid4svod,
+                        null           r_kxe,
+                        null           r_kxe_budget,     
+                        null           r_kxe_remap,
+                        null           c_kxe,
+                        null           c_kxe_remap,
+                        code_expense,
+                        name_expense,
+                        null           os_code,
+                        null           os_name,
+                        amount         amount_withnds,
+                        confirms,
+                        is_fact,
+                        null           r_id,
+                        null           r_num,
+                        null           date_req,
+                        null           supplier,
+                        null           nazn,
+                        null           summa_plat,
+                        null           summa_nds,
+                        null           cur, 
+                        null           file_path,
+                        '1'            in_budget_code,
+                        null           c_nds,
+                        null           c_comment,
+                        null           c_return_reason,
+                        null           c_pay_cond,
+                        null           pay_type,
+                        null		   c_problem,
+                        null           state
+                   FROM (select a5_1.c_code            hozed,
+                                a5_1.c_hoz             hozed_budgetdbu_name,
+                                case when a2_1.c_code_expense='2850' then a1_1.c_code_os      else a2_1.c_code_expense end code_expense,
+                                case when a2_1.c_code_expense='2850' then r1.c_cost_code_name else a2_1.c_name_expense end name_expense, 
+                                'Документы плана'      confirms,
+                                0                      is_fact,
+                                a1_1.c_year, 
+                                a1_1.c_january, 
+                                a1_1.c_febriary, 
+                                a1_1.c_march, 
+                                a1_1.c_april, 
+                                a1_1.c_may, 
+                                a1_1.c_june, 
+                                a1_1.c_jule, 
+                                a1_1.c_august, 
+                                a1_1.c_september, 
+                                a1_1.c_oktober, 
+                                a1_1.c_november, 
+                                a1_1.c_december
+                           from s06.z#tmc_rash_stats a1_1,
+                                s06.z#spr_code_expense a2_1,
+                                s06.z#hozed a5_1,
+                                (select t.c_cost_code, t.c_cost_code_name
+                                   from s06.z#kas_spr_rashod t 
+                                  where state_id = 'WORK' 
+                                  group by t.c_cost_code, t.c_cost_code_name) r1
+                          where 1=1
+                            and a1_1.c_costs_code = a2_1.id(+)
+                            and a1_1.c_kxe_2 = a5_1.id(+)
+                            and a1_1.c_code_os = r1.c_cost_code(+)
+                            and a1_1.c_year >= 2022
+                            and a5_1.c_code in (501,502,503,902,1160,1800,1300,1310,1320,1140,1340,1350,1360,1370,1250,1270,1240,1245,1120,1330)
+                          )
+                UNPIVOT (amount
+                    FOR mm IN 
+                          (C_JANUARY   AS '01.01.',
+                           C_FEBRIARY  AS '01.02.',
+                           C_MARCH     AS '01.03.',
+                           C_APRIL     AS '01.04.',
+                           C_MAY       AS '01.05.',
+                           C_JUNE      AS '01.06.',
+                           C_JULE      AS '01.07.',
+                           C_AUGUST    AS '01.08',
+                           C_SEPTEMBER AS '01.09',
+                           C_OKTOBER   AS '01.10',
+                           C_NOVEMBER  AS '01.11',
+                           C_DECEMBER  AS '01.12')) 
+                  where amount <> 0) d
+                  
+          left join s06.z#hozed h6
+            on h6.c_code = d.hozedid4svod) dd;
+            
+            
+
+LEFT JOIN ([BUDGET_PAID])
+Load
+    C_NUM                                      AS [Номер заявки], 
+    MapSubstring('KazakhCharMapping', Trim(Replace(C_NAME, '(БЛОК)', '')))  AS [Инициатор заявки],        
+    C_EMAIL                                    AS [Email инициатора]
+;
+SQL
+WITH Step1_Clean AS (
+    SELECT r.C_NUM
+         , u.c_name             
+         , UPPER(REPLACE(u.c_email, ' ', '')) AS C_EMAIL
+    FROM s06.z#kas_request_pay r
+       , s06.z#product p          
+       , s06.z#user u             
+    WHERE p.id = r.id 
+      AND u.id = p.c_create_user
+      AND r.STATE_ID = 'PAID'
+      AND r.C_DATE_REQ > TO_DATE('01/01/2024', 'DD/MM/YYYY')
+),
+Step2_Positions AS (
+    SELECT C_NUM
+         , c_name
+         , C_EMAIL
+    FROM Step1_Clean
+)
+SELECT C_NUM
+     , c_name
+     , C_EMAIL
+FROM Step2_Positions;
+
+[BUDGET]:
+LOAD 
+     /*keys*/
+    date(DT) as [DT_Ключ],
+    HOZED				AS [КХЕ инициатора],
+    HOZED_BUDGET		AS [КХЕ бюджета (ГБ)],
+    HOZED_ACC		  	AS [КХЕ филиала],
+    HOZED_FIL_DBU	  	AS [КХЕ филиала ДБУ],
+	HOZED_BUDGET_DBU  	AS [КХЕ бюджета ДБУ], 
+    CODE_EXPENSE 		AS [Код затрат],
+    NAME_EXPENSE	  	AS [Наименование кода затрат],
+    OS_CODE			  	AS [Код ОС],
+	OS_NAME			  	AS [Наименование ОС],
+    TYPE_EXPENSE 		AS [Вид затрат],
+    AMOUNT_PLAN	 		AS [План],
+    AMOUNT		 		AS [Факт],
+    AMOUNT_WITHNDS 		AS [Факт с НДС],
+    CONFIRMS	 		AS [Тип документы],
+    R_ID		 		AS [id заявки],
+    R_NUM		 		AS [Номер заявки],
+    DATE_REQ	 		AS [Дата заявки],
+    SUPPLIER	 		AS [Поставщик],
+    NAZN		 		AS [Назначение платежа],
+    SUMMA_PLAT	 		AS [Сумма заявки],
+    SUMMA_NDS	 		AS [Сумма НДС],
+    CUR			 		AS [Валюта],
+    STATE    	 		AS [Статус заявки],
+    FILE_PATH	 		AS [Ссылка на счет],
+    IN_BUDGET	 		AS [В бюджете],
+    IN_BUDGET_CODE 		AS [В бюджете(код)],
+    C_NDS	       		AS [С/без НДС],
+    C_COMMENT	   		AS [Комментарий],
+	C_RETURN_REASON 	AS [Причина возврата],
+	C_PAY_COND			AS [Период оплат],       
+	PAY_TYPE	    	AS [Тип платежа],
+    C_PROBLEM		    AS [Проект/Продукт];
+select dd.*,
+       case when os_code is null then code_expense else os_code end code_expense4svod,
+       case when os_code is null then name_expense else os_name end name_expense4svod,
+       case when HOZED = 999 and  HOZED_BUDGET_DBU not in (501, 502, 503, 902, 1160, 1800,1300,1310,1320,1140,1340,1350,1360,1370,1250,1270,1240,1245,1120,1330) then 1 else 0 end chk1,
+       STANDARD_HASH(STANDARD_HASH(dt, 'MD5') ||
+                     STANDARD_HASH(hozed, 'MD5') ||                  
+                     STANDARD_HASH(hozed_budget, 'MD5') ||
+                     //STANDARD_HASH(hozed_budgetdbu_name, 'MD5') ||
+                     STANDARD_HASH(hozed_acc, 'MD5') ||
+                     STANDARD_HASH(hozed_fil_dbu, 'MD5') ||
+                     STANDARD_HASH(hozed_budget_dbu, 'MD5') ||
+                     STANDARD_HASH(code_expense, 'MD5') ||
+                     STANDARD_HASH(name_expense, 'MD5') ||
+                     STANDARD_HASH(os_code, 'MD5') ||
+                     STANDARD_HASH(type_expense, 'MD5') ||
+                     STANDARD_HASH(amount_plan, 'MD5') ||
+                     STANDARD_HASH(amount, 'MD5') ||
+                     STANDARD_HASH(confirms, 'MD5') ||
+                     STANDARD_HASH(r_id, 'MD5') ||
+                     STANDARD_HASH(r_num, 'MD5') ||
+                     STANDARD_HASH(date_req, 'MD5') ||
+                     STANDARD_HASH(supplier, 'MD5') ||
+                     STANDARD_HASH(summa_plat, 'MD5') ||
+                     STANDARD_HASH(summa_nds, 'MD5') ||
+                     STANDARD_HASH(cur, 'MD5') ||
+                     //STANDARD_HASH(state_id, 'MD5') ||
+                     STANDARD_HASH(in_budget_code, 'MD5')||
+                     STANDARD_HASH(c_nds, 'MD5') , 'MD5') as MD5
+  from (select dt,
+               hozedid4svod ||' '||h6.c_hoz hozed4svod,
+               hozedid4svod hozedid4svod_code,
+               h6.c_hoz     hozedid4svod_name,
+               r_kxe         hozed,        
+               r_kxe_budget  hozed_budget,
+               r_kxe_remap    hozed_acc,
+               c_kxe          hozed_fil_dbu,
+               coalesce(c_kxe_remap,r_kxe_budget) hozed_budget_dbu,
+               case when instr(code_expense, '/')>0 then regexp_substr(code_expense,'(\d+)') else code_expense end code_expense,
+               name_expense,  
+               os_code,
+               os_name,
+               case when code_expense='2850'     then 'Capex'
+                    when code_expense like '2%'  then 'Opex'
+                    when code_expense like '1%'  then 'Capex'
+               end type_expense,
+               decode(d.is_fact, 0, amount_withnds, 0) amount_plan,
+               amount_withnds,
+               amount_withnds-summa_nds  amount,
+               confirms,
+               r_id,
+               r_num,
+               date_req,
+               supplier, 
+               nazn,
+               case when nazn like '%ЛС%' then substr(nazn, instr(nazn, 'ЛС')) end ls2,
+               summa_plat,
+               summa_nds,      /*сумма ндс*/
+               cur,          
+               file_path,
+               case when in_budget_code='1' then 'В бюджете'
+                    when in_budget_code='0' then 'Вне бюджета' end in_budget,
+               in_budget_code,
+               c_nds,
+               c_comment,
+               c_return_reason,
+               c_pay_cond,       
+               pay_type,
+               c_problem,
+               state
+          from (select /*+ parallel(64)*/
+                       distinct
+                       t.dt,
+                       case when h5.c_code is not null and t.pay_type_id=8608627778 then t.r_kxe_budget
+                            when t.r_kxe <> '9999' and h5.c_code not in (501, 502, 503, 902, 1160, 1800,1300,1310,1320,1140,1340,1350,1360,1370,1250,1270,1240,1245,1120,1330)
+                            then t.r_kxe_budget
+                            else coalesce(h5.c_code,  t.r_kxe_budget)
+                       end hozedid4svod,
+                       t.r_kxe,
+                       t.r_kxe_budget,
+                       t.r_kxe_remap,
+                       coalesce(h4.c_code,t.r_kxe_remap) c_kxe,       /*кхе фил дбу*/
+                       h5.c_code           c_kxe_remap,  /*кхе бюдж дбу*/
+                       a.code_expense,
+                       a.name_expense,
+                       a.os_code,
+                       a.os_name,
+                       a.amount_withnds,
+                       'Счета на оплату'   confirms,
+                       1                   is_fact,
+                       t.r_id,
+                       t.r_num,
+                       t.date_req,
+                       t.supplier,
+                       t.nazn,
+                       t.summa_plat,
+                       case when t.c_nds = 1 then a.amount_withnds*12/112 else 0 end  summa_nds,      /*сумма ндс*/
+                       t.cur,
+                       -- null              state_id,
+                       t.file_path,
+                       t.in_budget_code,
+                       t.c_nds,
+                       t.c_comment,
+                       t.c_return_reason,
+                       t.c_pay_cond,
+                       t.pay_type,
+                       t.c_problem,
+                       t.state
+                       
+                  from bi.f$kas_request_pay t
+                  
+                  left join bi.f$kas_request_pay2850 a
+                    on a.r_id = t.r_id
+                   and a.code_expense = t.code_expense 
+                  
+                  left join s06.z#hozed h4 /*КХЕ филиала ДБУ*/
+                    on a.c_kxe = h4.id
+
+                  left join s06.z#hozed h5 /*КХЕ бюджета ДБУ*/
+                    on a.c_kxe_remap = h5.id 
+                     
+                 where 1=1
+                   and 
+                        t.r_kxe_budget in (1300,1310,1320,1140,1340,1350,1360,1370)
+                        and state != 'Оплачено'
+                        and date_req > TO_DATE('01/01/2024', 'DD/MM/YYYY')
+
+                 union all /* ИБСО/справочники/KAS. Бюджет банка*/
+
+                 SELECT to_date(mm||c_year, 'DD.MM.YYYY') dt,
+                        hozed          hozedid4svod,
+                        null           r_kxe,
+                        null           r_kxe_budget,     
+                        null           r_kxe_remap,
+                        null           c_kxe,
+                        null           c_kxe_remap,
+                        code_expense,
+                        name_expense,
+                        null           os_code,
+                        null           os_name,
+                        amount         amount_withnds,
+                        confirms,
+                        is_fact,
+                        null           r_id,
+                        null           r_num,
+                        null           date_req,
+                        null           supplier,
+                        null           nazn,
+                        null           summa_plat,
+                        null           summa_nds,
+                        null           cur, 
+                        null           file_path,
+                        '1'            in_budget_code,
+                        null           c_nds,
+                        null           c_comment,
+                        null           c_return_reason,
+                        null           c_pay_cond,
+                        null           pay_type,
+                        null		   c_problem,
+                        null           state
+                   FROM (select a5_1.c_code            hozed,
+                                a5_1.c_hoz             hozed_budgetdbu_name,
+                                case when a2_1.c_code_expense='2850' then a1_1.c_code_os      else a2_1.c_code_expense end code_expense,
+                                case when a2_1.c_code_expense='2850' then r1.c_cost_code_name else a2_1.c_name_expense end name_expense, 
+                                'Документы плана'      confirms,
+                                0                      is_fact,
+                                a1_1.c_year, 
+                                a1_1.c_january, 
+                                a1_1.c_febriary, 
+                                a1_1.c_march, 
+                                a1_1.c_april, 
+                                a1_1.c_may, 
+                                a1_1.c_june, 
+                                a1_1.c_jule, 
+                                a1_1.c_august, 
+                                a1_1.c_september, 
+                                a1_1.c_oktober, 
+                                a1_1.c_november, 
+                                a1_1.c_december
+                           from s06.z#tmc_rash_stats a1_1,
+                                s06.z#spr_code_expense a2_1,
+                                s06.z#hozed a5_1,
+                                (select t.c_cost_code, t.c_cost_code_name
+                                   from s06.z#kas_spr_rashod t 
+                                  where state_id = 'WORK' 
+                                  group by t.c_cost_code, t.c_cost_code_name) r1
+                          where 1=1
+                            and a1_1.c_costs_code = a2_1.id(+)
+                            and a1_1.c_kxe_2 = a5_1.id(+)
+                            and a1_1.c_code_os = r1.c_cost_code(+)
+                            and a1_1.c_year >= 2022
+                            and a5_1.c_code in (501,502,503,902,1160,1800,1300,1310,1320,1140,1340,1350,1360,1370,1250,1270,1240,1245,1120,1330)
+                          )
+                UNPIVOT (amount
+                    FOR mm IN 
+                          (C_JANUARY   AS '01.01.',
+                           C_FEBRIARY  AS '01.02.',
+                           C_MARCH     AS '01.03.',
+                           C_APRIL     AS '01.04.',
+                           C_MAY       AS '01.05.',
+                           C_JUNE      AS '01.06.',
+                           C_JULE      AS '01.07.',
+                           C_AUGUST    AS '01.08',
+                           C_SEPTEMBER AS '01.09',
+                           C_OKTOBER   AS '01.10',
+                           C_NOVEMBER  AS '01.11',
+                           C_DECEMBER  AS '01.12')) 
+                  where amount <> 0) d
+                  
+          left join s06.z#hozed h6
+            on h6.c_code = d.hozedid4svod) dd;
+ 
+SQL
+SELECT REP_DATE, 
+	   CNT_SERIAL_NUMBER, 
+       KHE 
+FROM BI.SELF_SERVICE_DEVICES_CNT_V;
+
+Map_ApplicationDate:
+MAPPING LOAD
+    [Номер заявки], 
+    [Дата заявки]   
+RESIDENT [BUDGET];
+
+// Шаг 1: Загружаем основные данные из Oracle во временную таблицу [Tmp_Заявки]
+[Tmp_Заявки]:
+LOAD
+    *,
+    If(Len(SubField([Инициатор заявки], ' ', 3)) > 0, SubField([Инициатор заявки], ' ', 3), '') AS [Отчество],
+    // Теперь [Дата заявки] находится в этом же потоке, и мы можем спокойно ее вычитать!
+    Interval(
+        If(([Дата/время возврата] - [Дата заявки]) < 0, 
+            ([Дата/время возврата] - [Дата заявки]) + 0.5, 
+            ([Дата/время возврата] - [Дата заявки])
+        ), 
+        'hh:mm:ss'
+    )                                          AS [Время отклонения]
+;
+Load
+    C_NUM                                      AS [Номер заявки], 
+    MapSubstring('KazakhCharMapping', Trim(Replace(C_NAME, '(БЛОК)', '')))        AS [Инициатор заявки], 
+    UPPER(Trim(Replace(C_NAME, '(БЛОК)', ''))) AS [ФИО_КЛЮЧ],         
+    C_ARHIV_RET_REASON                         AS [Причины возврата список], 
+    
+    // Новые поля, полученные из парсинга строки возврата
+    RET_DATE_TIME                              AS [Дата/время возврата],
+    RET_PERSON                                 AS [Кто вернул],
+    RET_STATUS_FROM                            AS [Из статуса],
+    If(Match(RET_STATUS_FROM, 'Не обработано', 'На возврат инициатору'), 'Отменено', RET_STATUS_TO) AS [В статус],
+    
+    C_EMAIL                                    AS [Email инициатора],
+    ApplyMap('Map_ApplicationDate', C_NUM, Null()) AS [Дата заявки]
+;
+SQL
+WITH Step1_Clean AS (
+    SELECT r.C_NUM
+         , u.c_name
+         , r.C_ARHIV_RET_REASON                  
+         , r.c_put_budget 
+         , UPPER(REPLACE(u.c_email, ' ', '')) AS C_EMAIL
+         -- Очищаем ВСЮ строку от переносов (не отрезаем Причина:)
+         , REPLACE(REPLACE(r.C_ARHIV_RET_REASON, CHR(13), ''), CHR(10), '') AS full_sms
+           
+    FROM s06.z#kas_request_pay r
+       , s06.z#product p          
+       , s06.z#user u             
+    WHERE p.id = r.id 
+      AND u.id = p.c_create_user
+      AND r.STATE_ID != 'PAID'
+      AND r.C_DATE_REQ > TO_DATE('01/01/2024', 'DD/MM/YYYY')
+),
+Step2_Positions AS (
+    SELECT C_NUM
+         , c_name
+         , C_ARHIV_RET_REASON
+         , c_put_budget
+         , C_EMAIL
+         , full_sms
+         -- Считаем сколько всего дат в тексте
+         , REGEXP_COUNT(full_sms, '[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}') AS date_count
+         -- Позиция ПОСЛЕДНЕЙ даты
+         , CASE 
+             WHEN REGEXP_COUNT(full_sms, '[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}') > 0 
+             THEN REGEXP_INSTR(full_sms, '[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}', 1, 
+                  REGEXP_COUNT(full_sms, '[0-9]{2}\.[0-9]{2}\.[0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2}'))
+             ELSE 0 
+           END AS last_date_pos
+    FROM Step1_Clean
+),
+Step3_Extract AS (
+    SELECT C_NUM
+         , c_name
+         , C_ARHIV_RET_REASON
+         , c_put_budget
+         , C_EMAIL
+         , full_sms
+         , date_count
+         , last_date_pos
+         -- Текст ДО последней даты
+         , CASE WHEN last_date_pos > 0 THEN SUBSTR(full_sms, 1, last_date_pos - 1) ELSE NULL END AS text_before_date
+         -- Текст ПОСЛЕ последней даты (19 символов самой даты)
+         , CASE WHEN last_date_pos > 0 THEN SUBSTR(full_sms, last_date_pos + 19) ELSE NULL END AS text_after_date
+         -- Позиция ПОСЛЕДНЕГО "Причина:" перед последней датой (ищем с конца)
+         , CASE WHEN last_date_pos > 1 THEN INSTR(SUBSTR(full_sms, 1, last_date_pos - 1), 'Причина:', -1) ELSE 0 END AS prev_prichina_pos
+    FROM Step2_Positions
+)
+SELECT C_NUM
+     , c_name
+     , C_ARHIV_RET_REASON
+     , c_put_budget
+     , C_EMAIL
+     
+     -- 1. ДАТА/ВРЕМЯ (последняя дата)
+     , CASE 
+         WHEN last_date_pos > 0 THEN SUBSTR(full_sms, last_date_pos, 19)
+         ELSE NULL 
+       END AS RET_DATE_TIME
+     
+     -- 2. СТАТУС "ИЗ"
+     , TRIM(
+         CASE 
+           WHEN last_date_pos > 0 THEN
+             CASE 
+               -- "Из статуса:" есть в последнем блоке (после последнего "Причина:" перед датой)
+               WHEN prev_prichina_pos > 0 
+                    AND INSTR(SUBSTR(text_before_date, prev_prichina_pos), 'Из статуса:"') > 0 THEN 
+                   REGEXP_SUBSTR(SUBSTR(text_before_date, prev_prichina_pos), 'Из статуса:"([^"]+)"', 1, 1, 'i', 1)
+               -- "Из статуса:" есть, но "Причина:" не было (первый блок = последний)
+               WHEN prev_prichina_pos = 0 
+                    AND INSTR(text_before_date, 'Из статуса:"') > 0 THEN
+                   REGEXP_SUBSTR(text_before_date, 'Из статуса:"([^"]+)"', 1, 1, 'i', 1)
+               -- Нет "Из статуса:" — пытаемся извлечь имя статуса (текст после "Причина:" и до даты)
+               WHEN prev_prichina_pos > 0 THEN
+                   TRIM(REGEXP_SUBSTR(SUBSTR(text_before_date, prev_prichina_pos + LENGTH('Причина:')), '([А-ЯЁ][а-яё ]+)$'))
+               -- Нет ни "Из статуса:", ни "Причина:" — берём весь текст до даты
+               ELSE TRIM(text_before_date)
+             END
+           ELSE NULL 
+         END
+       ) AS RET_STATUS_FROM
+
+     -- 3. КТО ВЕРНУЛ (текст после даты, до "В статус:" или "Причина:")
+     , TRIM(
+         CASE 
+           WHEN last_date_pos > 0 THEN 
+             CASE 
+               -- Режем до "В статус:" если есть
+               WHEN INSTR(text_after_date, 'В статус:') > 0 THEN 
+                   SUBSTR(text_after_date, 1, INSTR(text_after_date, 'В статус:') - 1)
+               -- Иначе режем до "Причина:" если есть
+               WHEN INSTR(text_after_date, 'Причина:') > 0 THEN 
+                   SUBSTR(text_after_date, 1, INSTR(text_after_date, 'Причина:') - 1)
+               -- Иначе берём весь хвост
+               ELSE text_after_date
+             END
+           ELSE NULL 
+         END
+       ) AS RET_PERSON
+       
+     -- 4. СТАТУС "В"
+     , TRIM(
+         CASE 
+           WHEN last_date_pos > 0 AND INSTR(text_after_date, 'В статус:"') > 0 THEN 
+               REGEXP_SUBSTR(text_after_date, 'В статус:"([^"]+)"', 1, 1, 'i', 1)
+           ELSE NULL 
+         END
+       ) AS RET_STATUS_TO
+
+FROM Step3_Extract;
+
+
+// Переключаемся на StarRocks
+LIB CONNECT TO 'staroks (BKS)';
+
+// Шаг 2: Ищем табельный в StarRocks по Email
+LEFT JOIN ([Tmp_Заявки])
+LOAD
+    EMAIL                                                 AS [Email инициатора],
+    If(Len(Trim(MIDDLE_NAME)) > 0, Trim(MIDDLE_NAME), '') AS [Отчество],
+    TAB_NUM                                               AS [Табельный_по_Email]
+;
+SELECT 
+    EMAIL,
+    TAB_NUM,
+    MIDDLE_NAME
+FROM (
+    SELECT 
+        UPPER(REPLACE(u.EMAIL, ' ', '')) AS EMAIL, 
+        u.TAB_NUM,
+        u.MIDDLE_NAME,
+        u.LAST_LOGIN,
+        -- Нумеруем строки для каждого EMAIL от самой свежей даты LAST_LOGIN к самой старой
+        ROW_NUMBER() OVER (PARTITION BY UPPER(REPLACE(u.EMAIL, ' ', '')) ORDER BY u.LAST_LOGIN DESC) AS rn
+    FROM S0008.USERS AS u
+    WHERE u.TAB_NUM IS NOT NULL 
+      AND u.EMAIL IS NOT NULL 
+      AND u.EMAIL != ''
+) AS sub
+-- Берем только самую первую (т.е. самую позднюю по LAST_LOGIN) строку для каждого Email
+WHERE rn = 1;
+
+// Шаг 3: Ищем табельный в StarRocks по склеенному ФИО
+LEFT JOIN ([Tmp_Заявки])
+LOAD
+    STARROCKS_FIO AS [ФИО_КЛЮЧ],
+    TAB_NUM       AS [Табельный_по_ФИО]
+;
+SELECT 
+    UPPER(
+        TRIM(
+            CONCAT_WS(' ', u.LAST_NAME, u.FIRST_NAME, IF(TRIM(u.MIDDLE_NAME) = '' OR ISNULL(u.MIDDLE_NAME), NULL, u.MIDDLE_NAME))
+        )
+    ) AS STARROCKS_FIO, 
+    u.TAB_NUM 
+FROM S0008.USERS AS u
+WHERE u.TAB_NUM IS NOT NULL;
+
+
+// Шаг 4: Джойним итоговый результат прямо в вашу основную таблицу [BUDGET]
+LEFT JOIN ([BUDGET])
+LOAD
+    [Номер заявки],
+    [Инициатор заявки],
+    [Причины возврата список],
+    [Email инициатора],
+    Num(If(IsNull([Табельный_по_Email]), [Табельный_по_ФИО], [Табельный_по_Email]), '000000000') AS [Табельный инициатора],
+    [Дата/время возврата],
+	MapSubstring('KazakhCharMapping', [Кто вернул]) AS [Кто вернул],
+	[Из статуса],
+	[В статус],
+    [Время отклонения]
+RESIDENT [Tmp_Заявки];
+
+// Очищаем временную таблицу 
+DROP TABLE [Tmp_Заявки];
+
+
+// 1. Загружаем данные из Oracle ОДИН раз во временную таблицу Qlik
+Tmp_StaffList:
+SQL
+WITH LatestStaff AS (
+    SELECT 
+        TAX_ID,
+        POSITION_NAME,
+        CASE WHEN FIRING_DATE IS NULL THEN 'Действующий' ELSE 'Уволен' END AS WORK_STATUS,
+        EMPL_NAME,
+        ROW_NUMBER() OVER (
+            PARTITION BY TAX_ID 
+            ORDER BY CASE WHEN FIRING_DATE IS NULL THEN 1 ELSE 2 END, 
+                     FIRING_DATE DESC NULLS FIRST
+        ) AS rn
+    FROM S0008.S_STAFFLIST2
+)
+SELECT 
+    s.TAB_NUM,
+    l.EMPL_NAME, 
+    l.POSITION_NAME,
+    l.WORK_STATUS
+FROM S0008.S_STAFFLIST2 s
+JOIN LatestStaff l ON s.TAX_ID = l.TAX_ID AND l.rn = 1
+;
+
+LEFT JOIN ([BUDGET])
+LOAD
+    TAB_NUM       AS [Табельный инициатора],
+    POSITION_NAME AS [Должность инициатора],
+    WORK_STATUS   AS [Статус инициатора]
+RESIDENT Tmp_StaffList;
+
+
+LEFT JOIN ([BUDGET])
+LOAD
+    EMPL_NAME       AS [Кто вернул],
+    POSITION_NAME AS [Должность вернувшего],
+    WORK_STATUS   AS [Статус вернувшего]
+RESIDENT Tmp_StaffList;
+
+DROP TABLE Tmp_StaffList;
+
+Map_GeneralReason:
+MAPPING LOAD * INLINE [
+    Категория причин, Общая причина
+    Возврат по просьбе инициатора, Возврат по просьбе инициатора
+    Вопросы к стоимости/выбору позиций, Вопросы к стоимости/выбору позиций
+    Дубль, Дубль
+    Завести через 1С, Завести через 1С
+    Не предоставлен договор, Не предоставлен договор
+    Неактуальный счет, Некорректные документы
+    Неизвестно, Неизвестно
+    Некорректная дата в ЭСФ, Некорректные документы
+    Некорректная детализация, Некорректное заведение заявки
+    Некорректная сумма, Некорректная сумма
+    Некорректное заведение заявки, Некорректное заведение заявки
+    Некорректное назначение, Некорректное заведение заявки
+    Некорректные документы, Некорректные документы
+    Некорректный вид платежа, Некорректное заведение заявки
+    Некорректный выбор «В бюджете», Некорректное заведение заявки
+    Некорректный КХЕ, Некорректный КХЕ
+    Некорректный НДС, Некорректная сумма
+    Некорректный поставщик, Некорректное заведение заявки
+    Объединение счетов, Объединение счетов
+    Отсутствует согласование контролера, Отсутствует согласование контролера
+    Отсутствует ЭСФ, Отсутствует ЭСФ
+    Поставщик на СНР, Поставщик на СНР
+    Превышение бюджета, Превышение бюджета
+    Прочие, Прочие
+    Тестовая заявка, Тестовая заявка
+];
+
+Map_Stage:
+Mapping LOAD * Inline [
+Этап рассмотрения, Этап
+Инициатор, 1
+Контролер, 2
+УКЗИ, 3
+Доп. Согласующий, 4
+Согласующий 1-го уровня, 5
+Согласующий 2-го уровня, 6
+Согласующий 3-го уровня, 7
+ДБУ, 8
+];
+
+
+BUDGET_FINAL:
+load *, 
+    ApplyMap('Map_GeneralReason', [Категория причин], 'Другие') AS [Общая причина],
+    ApplyMap('Map_Stage', [Этап рассмотрения], 'Неизвестный этап') AS [Этап];
+LOAD*, If([Базовая Категория] <> 'Прочие', [Базовая Категория],
+    Coalesce(
+        // БЛОК 1 (Условия 1-40)
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1310*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1320*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1340*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1360*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1250*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1270*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*исчерп*'), 'Превышение бюджета',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Бюджет*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1310*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1320*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1340*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1360*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*превыш*') and WildMatch([Причина возврата], '*бюдж*'), 'Превышение бюджета',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1250*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*1270*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*000*'), 'Превышение бюджета',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*верн*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*Бюджет*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*просьб*') and WildMatch([Причина возврата], '*филиал*'), 'Возврат по просьбе инициатора',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*филиал*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*актуал*') and WildMatch([Причина возврата], '*заявк*'), 'Неактуальный счет',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1310*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1320*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1340*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1360*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1310*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1320*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1340*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1360*'), 'Некорректный КХЕ'
+        )))))))))))))))))))))))))))))))))))))))) , 
+
+        // БЛОК 2 (Условия 41-80)
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*вернуть*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*верн*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*Бюджет*') and WildMatch([Причина возврата], '*000*'), 'Превышение бюджета',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*марк*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*уточн*') and WildMatch([Причина возврата], '*бюджет*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*вернуть*') and WildMatch([Причина возврата], '*бюджет*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*относит*') and WildMatch([Причина возврата], '*бюдж*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*Корректиров*') and WildMatch([Причина возврата], '*бюджет*'), 'Некорректный выбор «В бюджете»',
+        If(WildMatch([Причина возврата], '*бюджет*') and WildMatch([Причина возврата], '*транспорт*') and WildMatch([Причина возврата], '*отдел*'), 'Некорректный КХЕ',
+        If(Trim([Причина возврата]) = '-', 'Неизвестно',
+        If(Trim([Причина возврата]) = '.', 'Неизвестно',
+        If(Trim([Причина возврата]) = '/', 'Неизвестно',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*коррек*') and WildMatch([Причина возврата], '*оформл*') and WildMatch([Причина возврата], '*докумен*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*возврат*'), 'Возврат по просьбе инициатора',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*верн*') and WildMatch([Причина возврата], '*KXE*'), 'Некорректный КХЕ',
+        If(Trim([Причина возврата]) = 'ошибка', 'Неизвестно',
+        If(WildMatch([Причина возврата], '*просьб*') and WildMatch([Причина возврата], '*автор*'), 'Возврат по просьбе инициатора',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*код*') and WildMatch([Причина возврата], '*затрат*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*код*') and WildMatch([Причина возврата], '*затрат*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*цена*') and WildMatch([Причина возврата], '*завыш*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*цена*') and WildMatch([Причина возврата], '*высок*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*ошибоч*') and WildMatch([Причина возврата], '*цена*'), 'Некорректная сумма',
+        If(WildMatch([Причина возврата], '*централиз*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*повтор*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*Дулбликат*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*неверн*') and WildMatch([Причина возврата], '*данные*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*коррект*') and WildMatch([Причина возврата], '*данные*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*вопрос*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*ответ*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*данный*') and WildMatch([Причина возврата], '*провод*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*применим*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*данные*') and WildMatch([Причина возврата], '*работы*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*имеют*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*данный*') and WildMatch([Причина возврата], '*вид*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*предусмотр*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*через*') and WildMatch([Причина возврата], '*1C*'), 'Завести через 1С',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*это*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*расходы*') and WildMatch([Причина возврата], '*1300*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*1310*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*расходы*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*расходы*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*расходы*') and WildMatch([Причина возврата], '*1360*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*НЕТ*') and WildMatch([Причина возврата], '*расходы*') and WildMatch([Причина возврата], '*1320*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*Смет*') and WildMatch([Причина возврата], '*1370*'), 'Некорректный КХЕ'
+        )))))))))))))))))))))))))))))))))))))))) , 
+
+        // БЛОК 3 (Условия 81-120)
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*не*'), 'Отсутствует ЭСФ',
+        If(WildMatch([Причина возврата], '*платим*') and WildMatch([Причина возврата], '*по*') and WildMatch([Причина возврата], '*эсф*'), 'Отсутствует ЭСФ',
+        If(WildMatch([Причина возврата], '*до*') and WildMatch([Причина возврата], '*эсф*'), 'Отсутствует ЭСФ',
+        If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*отозв*'), 'Отсутствует ЭСФ',
+        If(WildMatch([Причина возврата], '*неверн*') and WildMatch([Причина возврата], '*срок*') and WildMatch([Причина возврата], '*услуг*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*срок*') and WildMatch([Причина возврата], '*годности*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*дата*'), 'Некорректная дата в ЭСФ',
+        If(WildMatch([Причина возврата], '*замечан*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*документ*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*Смет*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*смета*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*верн*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*смета*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*соответ*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*поставщик*') and WildMatch([Причина возврата], '*не*'), 'Некорректный поставщик',
+        If(WildMatch([Причина возврата], '*не верно*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*не требуется*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*указан*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*комментар*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*заявк*') and WildMatch([Причина возврата], '*был*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*уже*') and WildMatch([Причина возврата], '*заявк*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*действ*') and WildMatch([Причина возврата], '*заявк*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*дуль*') and WildMatch([Причина возврата], '*заявк*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*заявк*') and WildMatch([Причина возврата], '*ранее*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*верн*') and WildMatch([Причина возврата], '*тип*') and WildMatch([Причина возврата], '*заявк*'), 'Некорректный вид платежа',
+        If(WildMatch([Причина возврата], '*отозв*') and WildMatch([Причина возврата], '*заявк*'), 'Возврат по просьбе инициатора',
+        If(WildMatch([Причина возврата], '*заявк*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*прилож*') and WildMatch([Причина возврата], '*авр*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*прилож*') and WildMatch([Причина возврата], '*акт*') and WildMatch([Причина возврата], '*выпол*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*арифметик*'), 'Некорректная сумма',
+        If(WildMatch([Причина возврата], '*прилож*') and WildMatch([Причина возврата], '*резуль*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*прилож*') and WildMatch([Причина возврата], '*авр*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*авр*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*влож*') and WildMatch([Причина возврата], '*авр*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*не акуально*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*ошиб*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*берит*') and WildMatch([Причина возврата], '*дешевле*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*согласован*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*с*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*согласен*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*соглас*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*акт*') and WildMatch([Причина возврата], '*выпол*') and WildMatch([Причина возврата], '*работ*'), 'Некорректные документы'
+        )))))))))))))))))))))))))))))))))))))))) , // Конец Блока 3 (40 закрывающих скобок)
+
+        // БЛОК 4 (Условия 121-166)
+        If(WildMatch([Причина возврата], '*соглас*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*фикс*') and WildMatch([Причина возврата], '*платеж*') and WildMatch([Причина возврата], '*бухгал*'), 'Некорректный вид платежа',
+        If(WildMatch([Причина возврата], '*тоже*') and WildMatch([Причина возврата], '*завел*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*исправ*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*адрес*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*обосн*') and WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*коррек*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*отчет*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*коррек*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*?*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*расход*') and WildMatch([Причина возврата], '*Биот*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*статья*') and WildMatch([Причина возврата], '*расход*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*обратит*') and WildMatch([Причина возврата], '*Биот*'), 'Некорректный КХЕ',
+        If(WildMatch([Причина возврата], '*коррект*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*виз*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*верн*') and WildMatch([Причина возврата], '*подрядчик*'), 'Некорректный поставщик',
+        If(WildMatch([Причина возврата], '*заведет*') and WildMatch([Причина возврата], '*закуп*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*ответ*') and WildMatch([Причина возврата], '*Рубц*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*ответ*') and WildMatch([Причина возврата], '*Алекс*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*ждем*') and WildMatch([Причина возврата], '*ответ*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*REJECT*') and WildMatch([Причина возврата], '*на*') and WildMatch([Причина возврата], '*дораб*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*информ*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*это Бурземстрой*'), 'Некорректный поставщик',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*тако*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*обосн*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*дешевле*'), 'Вопросы к стоимости/выбору позиций',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*указат*') and WildMatch([Причина возврата], '*что*') and WildMatch([Причина возврата], '*это*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*вложит*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*прошу*') and WildMatch([Причина возврата], '*предост*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*обосн*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*корек*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*В*') and WildMatch([Причина возврата], '*назна*') and WildMatch([Причина возврата], '*ении*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*REJECT-Не согоасовано*'), 'Отсутствует согласование контролера',
+        If(WildMatch([Причина возврата], '*указать*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*связи*') and WildMatch([Причина возврата], '*с*') and WildMatch([Причина возврата], '*переплатой*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*перелимит*'), 'Превышение бюджета',
+        If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*основан*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*проверить*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*результат*') and WildMatch([Причина возврата], '*диагност*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*поясн*') and WildMatch([Причина возврата], '*необх*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*необход*') and WildMatch([Причина возврата], '*приказ*') and WildMatch([Причина возврата], '*с*') and WildMatch([Причина возврата], '*цел*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*измен*') and WildMatch([Причина возврата], '*назван*'), 'Некорректное назначение',
+        If(WildMatch([Причина возврата], '*кол-во*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*заполни*') and WildMatch([Причина возврата], '*колличество*'), 'Некорректное заведение заявки',
+        If(WildMatch([Причина возврата], '*отсут*') and WildMatch([Причина возврата], '*акт*'), 'Некорректные документы',
+        If(WildMatch([Причина возврата], '*опалата*') and WildMatch([Причина возврата], '*прошла*'), 'Дубль',
+        If(WildMatch([Причина возврата], '*0*', '*1*', '*2*', '*3*', '*4*', '*5*', '*6*', '*7*', '*8*', '*9*') and WildMatch([Причина возврата], '*бюдж*', '*лимит*', '*тг*', '*тенге*', '*тыс*', '*млн*'), 'Превышение бюджета'
+        )))))))))))))))))))))))))))))))))))))))))))))) , 
+
+        'Прочие'
+    )
+) AS [Категория причин];
+LOAD *, 
+    If(IsNull([Причины возврата список]), 'Инициатор',
+	If([Инициатор заявки] = [Кто вернул] or [Из статуса] = 'На возврат инициатору', 'Инициатор',
+	If([Из статуса] = 'В работе', 'Контролер',
+	If(Match([Из статуса], 'В работе ДБУ', 'Передано в ДБУ'), 'ДБУ',
+	If([Из статуса] = 'В работе УКЗИ', 'УКЗИ',
+	If([Из статуса] = 'Не обработано', 'Инициатор',
+	If([Должность вернувшего] = 'Исполнительный Директор', 'Согласующий 1-го уровня',
+	If([Должность вернувшего] = 'Управляющий Директор', 'Согласующий 2-го уровня',
+	If(WildMatch([Должность вернувшего], '*Заместитель Председателя Правления*'), 'Согласующий 3-го уровня',
+
+ApplyMap('Map_StageByName', [Кто вернул], 
+IF([Из статуса] = 'Отменено' and [В статус] = 'Отменено', 'Инициатор',Null()
+
+))))))))))) AS [Этап рассмотрения],
+    If(IsNull([Причина возврата]) or Len(Trim([Причина возврата])) = 0 or Match(Trim([Причина возврата]), '-', '.', '/', 'ошибка'), 'Неизвестно',
+If(Trim([Причина возврата]) = '?', 'Вопросы к стоимости/выбору позиций',
+
+
+If(IsNull([Причина возврата]) or Len(Trim([Причина возврата])) = 0 or MixMatch(Trim([Причина возврата]), '-', '.', '/', 'ошибка'), 'Неизвестно',
+If(Trim([Причина возврата]) = '?', 'Вопросы к стоимости/выбору позиций',
+
+If(IsNull([Причина возврата]) or Len(Trim([Причина возврата])) = 0, 'Неизвестно',
+    If(WildMatch([Причина возврата], '*Через 1С*'), 'Завести через 1С',
+    If(WildMatch([Причина возврата], '*Не верная*') and WildMatch([Причина возврата], '*сумма*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*Неверная*') and WildMatch([Причина возврата], '*сумма*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*не соответ*') and WildMatch([Причина возврата], '*счет*') and WildMatch([Причина возврата], '*сумма*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*не соответ*') and WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*сумма*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*эсф*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*не выставл*') and WildMatch([Причина возврата], '*эсф*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*дубл*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*инициат*'), 'Возврат по просьбе инициатора',
+    If(WildMatch([Причина возврата], '*КХЕ*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*снр*'), 'Поставщик на СНР',
+    If(WildMatch([Причина возврата], '*НДС*'), 'Некорректный НДС',
+    If(WildMatch([Причина возврата], '*без*') and WildMatch([Причина возврата], '*догов*'), 'Не предоставлен договор',
+    If(WildMatch([Причина возврата], '*предоставл*') and WildMatch([Причина возврата], '*договор*'), 'Не предоставлен договор',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*коррект*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*выстав*') and WildMatch([Причина возврата], '*эсф*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*закрываю*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*долж*'), 'Некорректная дата в ЭСФ',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*после*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*сумм*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*изм*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*влож*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*ОУР*'), 'Поставщик на СНР',
+    If(WildMatch([Причина возврата], '*эсф*') and WildMatch([Причина возврата], '*исправ*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*догов*') and WildMatch([Причина возврата], '*совпад*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*вне*') and WildMatch([Причина возврата], '*бюджет*'), 'Некорректный выбор «В бюджете»',
+    If(WildMatch([Причина возврата], '*Контрол*') and WildMatch([Причина возврата], '*согл*'), 'Отсутствует согласование контролера',
+    If(WildMatch([Причина возврата], '*контраген*'), 'Некорректный поставщик',
+    If(WildMatch([Причина возврата], '*нет*') and WildMatch([Причина возврата], '*контрол*'), 'Отсутствует согласование контролера',
+    If(WildMatch([Причина возврата], '*верны*') and WildMatch([Причина возврата], '*контрол*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*залож*') and WildMatch([Причина возврата], '*бюдж*'), 'Некорректный выбор «В бюджете»',
+    If(WildMatch([Причина возврата], '*завед*') and WildMatch([Причина возврата], '*бюдж*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*в*') and WildMatch([Причина возврата], '*бюджете*'), 'Некорректный выбор «В бюджете»',
+    If(WildMatch([Причина возврата], '*остат*') and WildMatch([Причина возврата], '*бюдж*'), 'Превышение бюджета',
+    If(WildMatch([Причина возврата], '*провер*') and WildMatch([Причина возврата], '*бюдж*'), 'Некорректный выбор «В бюджете»',
+    If(WildMatch([Причина возврата], '*бюдж*') and WildMatch([Причина возврата], '*месяц*'), 'Превышение бюджета',
+    If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*залож*'), 'Некорректный выбор «В бюджете»',
+    If(WildMatch([Причина возврата], '*детализац*'), 'Некорректная детализация',
+    If(WildMatch([Причина возврата], '*оплата*') and WildMatch([Причина возврата], '*прошл*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*1С*'), 'Завести через 1С',
+    If(WildMatch([Причина возврата], '*счет*') and WildMatch([Причина возврата], '*актуал*'), 'Неактуальный счет',
+    If(WildMatch([Причина возврата], '*Назначен*'), 'Некорректное назначение',
+    If(WildMatch([Причина возврата], '*сумма*') and WildMatch([Причина возврата], '*оплач*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*сумма*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*поставщ*') and WildMatch([Причина возврата], '*налог*'), 'Поставщик на СНР',
+    If(WildMatch([Причина возврата], '*счет*') and WildMatch([Причина возврата], '*отсутс*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*проект*') and WildMatch([Причина возврата], '*HQ*'), 'Некорректное назначение',
+    If(WildMatch([Причина возврата], '*докумет*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*%*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*оплат*') and WildMatch([Причина возврата], '*был*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*оплатили*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*налог*'), 'Поставщик на СНР',
+    If(WildMatch([Причина возврата], '*оплатим*'), 'Некорректная дата в ЭСФ',
+    If(WildMatch([Причина возврата], '*cloud*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*ошиб*') and WildMatch([Причина возврата], '*наимен*'), 'Некорректное назначение',
+    If(WildMatch([Причина возврата], '*ошиб*') and WildMatch([Причина возврата], '*сумм*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*справ*') and WildMatch([Причина возврата], '*ошиб*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*смет*') and WildMatch([Причина возврата], '*нов*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*смет*') and WildMatch([Причина возврата], '*ссылк*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*объед*'), 'Объединение счетов',
+    If(WildMatch([Причина возврата], '*оплат*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*дк*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*счет*') and WildMatch([Причина возврата], '*испр*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*ДС*') and WildMatch([Причина возврата], '*должен быть*') and WildMatch([Причина возврата], '*сумм*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*дог*'), 'Не предоставлен договор',
+    If(WildMatch([Причина возврата], '*счёт*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*1300*') and WildMatch([Причина возврата], '*1350*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*влож*') and WildMatch([Причина возврата], '*счет*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*счет*'), 'Некорректные документы',
+    If(WildMatch([Причина возврата], '*сумм*'), 'Некорректная сумма',
+    If(WildMatch([Причина возврата], '*оплач*'), 'Дубль',
+    If(WildMatch([Причина возврата], '*слов*'), 'Некорректное назначение',
+    If(WildMatch([Причина возврата], '*вид*') and WildMatch([Причина возврата], '*плат*'), 'Некорректный вид платежа',
+    If(WildMatch([Причина возврата], '*влож*') and WildMatch([Причина возврата], '*накл*'), 'Отсутствует ЭСФ',
+    If(WildMatch([Причина возврата], '*бин*'), 'Некорректный поставщик',
+    If(WildMatch([Причина возврата], '*тест*'), 'Тестовая заявка',
+    If(WildMatch([Причина возврата], '*магазин*'), 'Некорректный КХЕ',
+    If(WildMatch([Причина возврата], '*списан*'), 'Завести через 1С',
+    If(WildMatch([Причина возврата], '*стоимост*'), 'Вопросы к стоимости/выбору позиций',
+    If(WildMatch([Причина возврата], '*не*') and WildMatch([Причина возврата], '*указано*') and WildMatch([Причина возврата], '*чего*'), 'Некорректное назначение',
+    If(WildMatch([Причина возврата], '*остаток*'), 'Превышение бюджета',
+    'Прочие'
+    )))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) AS [Базовая Категория]
+Resident BUDGET;
+
+DROP TABLE BUDGET;
+
+
+[Справочник КХЕ]:
+LOAD * INLINE [
+КХЕ инициатора, Наименование КХЕ
+101, Астана
+102, Актау
+103, Атырау
+104, Актобе
+105, Павлодар
+106, Жезказган
+107, Караганда
+108, Кокшетау
+109, Кызылорда
+110, Костанай
+111, Семей
+112, Талдыкорган
+113, Уральск
+114, Усть-Каменогорск
+115, Тараз
+116, Шымкент
+118, Туркестан
+123, Южная Столица
+127, Талгар
+128, Кордай
+131, Петропавловск
+139, Кульсары
+140, Экибастуз
+142, Жезказган
+143, Семей
+501, Терминалы
+502, POS-терминалы
+503, Банкоматы
+902, Тех поддержка
+999, Закуп.Тех.код
+1120, Бэк-офис
+1140, Документация
+1160, Выпуск карт
+1240, Физическая охрана
+1245, Техническая охрана
+1250, Инкассация
+1270, ЦБО
+1300, Снабжение
+1310, Обслуживание
+1320, Транспорт
+1330, Закуп
+1340, Маркетинг
+1350, Инженерные Системы
+1360, БиОТ 
+1370, Строительство и ремонт 
+1800, Сопровождение клиентов
+];
+
+
+
+
+
+
+

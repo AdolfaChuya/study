@@ -1,0 +1,57 @@
+LIB CONNECT TO 'staroks (BKS)';
+
+
+TABLE_1:
+LOAD
+DOCUMENTNUMBER AS [Номер документа],
+IF((APPROVEDDATE - PLANNEDDATEMANAGER) > 0, 'Да','Нет') as [Просрочка],
+IF(APPROVEDDATE - PLANNEDDATEMANAGER > 0,APPROVEDDATE - PLANNEDDATEMANAGER,0) as [Просрочка время],
+DOCUMENTSTATUS AS [Статус],
+CREATEDDATE AS [Дата создания],
+ACCEPTEDDATE AS [Дата принятия],
+APPROVEDDATE AS [Дата согласования менеджером],
+MANAGERCONSTRUCTION AS [Менеджер],
+POSTINGDATE AS [Дата проводки документа],
+APPROVALDATENO AS [Дата согласования НО],
+APPROVEDBYNO AS [ФИО НО],
+REJECTEDDATENO AS [Дата отклонения НО],
+APPROVALDATEDTO AS [Дата согласования ДТО],
+APPROVEDBYDTO AS [ФИО ДТО],
+REJECTEDDATEDTO AS [Дата отклонения ДТО],
+APPROVALDATEDI AS [Дата согласования ДИ],
+APPROVEDBYDI AS [ФИО ДИ],
+REJECTEDDATEDI AS [Дата отклонения ДИ],
+MANAGERRESPONSETIME AS [Время ответа менеджера],
+NORESPONSETIME AS [Время ответа НО],
+DTORESPONSETIME AS [Время ответа ДТО],
+PLANNEDDATEMANAGER AS [Плановая дата менеджера],
+PLANNEDDATENO AS [Плановая дата НО],
+PLANNEDDATEDTO AS [Плановая дата ДТО],
+PLANNEDDATEDI AS [Плановая дата ДИ],
+NODEPARTMENTKPI AS [KPI НО],
+DTOKPI AS [KPI ДТО],
+DIKPI AS [KPI ДИ],
+TOTALDURATION AS [Общее время],
+TOTALWORKINGDAYS AS [Общее время в днях],
+KHE AS [КХЕ подразделения]
+;
+SQL
+SELECT * FROM S0008.GET_ESTIMATES_APPROVERD_ON_TIME;
+
+TABLE_2:
+LOAD
+MANAGERNAME,
+Month(Date#(MONTH, 'M')) as MONTH,
+YEAR,
+TOTAL,
+TOTALREJECTIONS,
+KPI,
+STATUS_EMP,
+S$CHANGE_DATE
+
+;
+SQL
+SELECT 
+	*, 
+    CASE WHEN MANAGERNAME LIKE '%_уволен'  THEN 'Уволен' ELSE 'Действующий' END AS STATUS_EMP
+FROM S0008.GET_ESTIMATES_RETURNED_FOR_REVISION

@@ -1,0 +1,298 @@
+LIB CONNECT TO 'staroks (BKS)';
+
+Uprox_List:
+LOAD
+    ID AS Uprox_ID,
+    UPR_NAME
+FROM [lib://AttachedFiles/FIO_CAT.xlsx]
+(ooxml, embedded labels, table is UPR);
+
+KMP_List:
+LOAD
+    Kaspi_ID,
+    CARD_NUM
+FROM [lib://AttachedFiles/CAT_2.xlsx]
+(ooxml, embedded labels, table is Лист4);
+
+PERSONAL:
+SQL
+SELECT
+	id AS EmpID_Valid,
+    name AS PERSON_NAME
+FROM S0099.PERSONAL
+where emp_type = 'EMP' AND COALESCE(pos, '') != '' AND name NOT REGEXP '[0-9]|№|Старший Смены';
+
+DEVICES:
+SQL
+SELECT 
+	id AS ACCESSPOINT,
+    name AS DEVICE_NAME,
+    hwconf
+FROM S0099.DEVICES;
+Left Join (DEVICES)
+LOAD
+    ACCESSPOINT,
+    NAME AS DEVICE_NAME_TEST,
+    Здание AS DEVICE_PLACE,
+    Город AS DEVICE_TOWN
+FROM [lib://AttachedFiles/DEVICES_Города_Здания.xlsx]
+(ooxml, embedded labels, table is Sheet1);
+
+Map_DevicePlace:
+MAPPING LOAD
+    ACCESSPOINT,
+    DEVICE_PLACE
+RESIDENT DEVICES;
+// Для фильрации только по определённым зданиям 
+// Логи в чистом виде 
+TMP_LOGS:
+LOAD 
+    internalEmpId,
+    ACCESSPOINT,
+    IF(IsNull(keyHex) or keyHex = '-1' or keyHex = '000000' or Match(ACCESSPOINT, 406, 504), 'FACEID',
+    IF(FACILITY_CODE = 100 and event_time >= MakeDate(2025, 1, 1) and Exists(Kaspi_ID, internalEmpId), 'KMP',
+    IF(Match(FACILITY_CODE, 117, 138, 37, 25, 179) and Exists(Uprox_ID, internalEmpId), 'U-PROX', 
+    'CARD'))) as PASS_CATEGORY,
+    Date(Floor(event_time)) as FullDate,
+    Date(MonthStart(event_time), 'MMMM YYYY') as MonthYear,
+    event_time
+WHERE Exists(EmpID_Valid, internalEmpId);
+SQL
+WITH unnested_logs AS (
+    SELECT 
+        t1.LOGID as EXTERNAL_ID,
+        t1.JSON_BODY,
+        log_item
+    FROM S0099.LOGS_ONLINE t1
+    LEFT JOIN UNNEST(
+        CASE 
+            WHEN json_query(t1.JSON_BODY, '$.logs') IS NULL THEN [] 
+            ELSE CAST(json_query(t1.JSON_BODY, '$.logs') AS ARRAY<JSON>)
+        END
+    ) AS t_raw(log_item) ON TRUE
+),
+extracted_data AS (
+    SELECT
+        coalesce(get_json_string(log_item, '$.logId'), get_json_string(JSON_BODY, '$.LOGS.logId')) as INTERNAL_LOGID,
+        coalesce(get_json_int(log_item, '$.time'), get_json_int(JSON_BODY, '$.LOGS.time')) as raw_time,
+        coalesce(get_json_int(log_item, '$.internalEmpId'), get_json_int(JSON_BODY, '$.LOGS.internalEmpId')) as internalEmpId,
+        coalesce(get_json_int(log_item, '$.accessPoint'), get_json_int(JSON_BODY, '$.LOGS.accessPoint')) as ACCESSPOINT,
+        coalesce(get_json_int(log_item, '$.direction'), get_json_int(JSON_BODY, '$.LOGS.direction')) as direction,
+        IF(log_item IS NOT NULL, 
+           get_json_string(log_item, '$.keyHex'), 
+           get_json_string(JSON_BODY, '$.LOGS.keyHex')
+        ) as final_key
+    FROM unnested_logs
+),
+filtered_data AS (
+    SELECT 
+        INTERNAL_LOGID,
+        raw_time,
+        FROM_UNIXTIME(raw_time - 18000) as event_time,
+        internalEmpId,
+        ACCESSPOINT,
+        direction,
+        final_key,
+        CAST(CONV(RIGHT(final_key, 6), 16, 10) AS BIGINT) as keyInt
+    FROM extracted_data
+    WHERE raw_time >= 1704067200 
+      AND direction != 3 
+      AND internalEmpId != 0
+),
+time_checked_data AS (
+    SELECT *,
+
+	LAG(raw_time) OVER (
+    PARTITION BY internalEmpId, ACCESSPOINT 
+    ORDER BY raw_time
+) as prev_raw_time
+    FROM filtered_data
+)
+SELECT
+    INTERNAL_LOGID,
+    event_time,
+    internalEmpId,
+    ACCESSPOINT,
+    direction,
+    final_key as keyHex,
+    IF(final_key IS NULL OR final_key = '000000', -1, keyInt DIV 65536) as FACILITY_CODE,
+    IF(final_key IS NULL OR final_key = '000000', -1, keyInt % 65536) as CARD_NUMBER
+FROM time_checked_data
+WHERE 
+    -- Оставляем строку, если она первая для этого ID (prev_raw_time IS NULL)
+    -- ИЛИ если разница со временем предыдущей строки составляет строго БОЛЬШЕ 5 секунд
+    prev_raw_time IS NULL 
+    OR (raw_time - prev_raw_time) > 5;
+
+// Облегчённая версия в разрезе дня
+LOGS_PRE:
+LOAD *, AutoNumber(EmpID_Valid & '|' & FullDate) as %Key_DayActivity;
+LOAD 
+    internalEmpId AS EmpID_Valid,
+    ACCESSPOINT,
+    PASS_CATEGORY,
+    FullDate,
+    MonthYear,
+    Count(1) as PassCount
+RESIDENT TMP_LOGS
+GROUP BY internalEmpId, ACCESSPOINT, PASS_CATEGORY, FullDate, MonthYear;
+DROP TABLE TMP_LOGS;
+
+Temp_Category_Counts:
+LOAD
+    EmpID_Valid,
+    MonthYear,
+    PASS_CATEGORY,
+    Count(DISTINCT FullDate) as DayHits
+RESIDENT LOGS_PRE
+WHERE Exists(ACCESSPOINT) // Это ключевой момент (см. пояснение ниже)
+  AND Match(ApplyMap('Map_DevicePlace', ACCESSPOINT), 'Конкорд', 'Каблан')
+GROUP BY EmpID_Valid, MonthYear, PASS_CATEGORY;
+
+User_Activity_Pivot:
+LOAD
+    EmpID_Valid as PivEmpID_Valid,
+    MonthYear as PivMonthYear,
+    // Суммируем дни для каждой категории отдельно
+    Sum(IF(PASS_CATEGORY = 'CARD', DayHits, 0))    as CARD,
+    Sum(IF(PASS_CATEGORY = 'KMP', DayHits, 0))     as KMP,
+    Sum(IF(PASS_CATEGORY = 'U-PROX', DayHits, 0))  as [U-PROX],
+    Sum(IF(PASS_CATEGORY = 'FACEID', DayHits, 0))  as [FACE-ID],
+    // Считаем общую сумму дней для удобства будущих расчетов %
+    Sum(DayHits)                                   as TotalDays
+RESIDENT Temp_Category_Counts
+GROUP BY EmpID_Valid, MonthYear;
+DROP TABLE Temp_Category_Counts;
+
+
+User_Segmentation:
+LOAD
+    *,
+    // 1. ТОЛЬКО ОДИН ТИП (снижаем до 75%, чтобы 10 из 13 попадали сюда)
+    IF(KMP_Share >= 0.75, 'Преимущественно KMP',
+    IF(FACE_Share >= 0.75, 'Преимущественно FACE-ID',
+    IF(CARD_Share >= 0.75, 'Преимущественно CARD',
+    IF(UPROX_Share >= 0.75, 'Преимущественно U-PROX',
+
+    // 2. УРОВЕНЬ: ГИБРИДЫ (A + B)
+    // Условие: Сумма двух любых лидеров >= 75%, при этом второй метод > 10%
+    IF((KMP_Share + FACE_Share) >= 0.75 AND KMP_Share > 0.1 AND FACE_Share > 0.1, 'KMP + FACE-ID',
+    IF((KMP_Share + CARD_Share) >= 0.75 AND KMP_Share > 0.1 AND CARD_Share > 0.1, 'KMP + CARD',
+    IF((KMP_Share + UPROX_Share) >= 0.75 AND KMP_Share > 0.1 AND UPROX_Share > 0.1, 'KMP + U-PROX',
+    IF((FACE_Share + CARD_Share) >= 0.75 AND FACE_Share > 0.1 AND CARD_Share > 0.1, 'FACE-ID + CARD',
+    IF((FACE_Share + UPROX_Share) >= 0.75 AND FACE_Share > 0.1 AND UPROX_Share > 0.1, 'FACE-ID + U-PROX',
+    IF((CARD_Share + UPROX_Share) >= 0.75 AND CARD_Share > 0.1 AND UPROX_Share > 0.1, 'CARD + U-PROX',
+
+    // 3. УРОВЕНЬ: ВСЁ ОСТАЛЬНОЕ (сюда упадут и "игнорирующие", и просто хаотичные пользователи)
+    'Смешанный профиль'
+    )))))))))) as User_Segment,
+    IF(Exists(Kaspi_ID, PivEmpID_Valid), 1, 0) as Flag_KMP_List,
+    IF(Exists(Uprox_ID, PivEmpID_Valid), 1, 0) as Flag_UPR_List;
+
+LOAD
+    PivEmpID_Valid,
+    PivMonthYear,
+    CARD, KMP, [U-PROX], [FACE-ID], TotalDays,
+    CARD / TotalDays as CARD_Share,
+    KMP / TotalDays as KMP_Share,
+    [U-PROX] / TotalDays as UPROX_Share,
+    [FACE-ID] / TotalDays as FACE_Share
+RESIDENT User_Activity_Pivot;
+
+DROP TABLE User_Activity_Pivot;
+
+Migration_Map:
+LOAD
+    PivEmpID_Valid as MigEmpID_Valid,
+    PivMonthYear as CurrentMonth,
+    // Ключ для связи с прошлым месяцем
+     Date(MonthStart(AddMonths(PivMonthYear, -1)), 'MMMM YYYY') as PreviousMonth,
+    User_Segment as Current_Segment,
+    IF(Exists(Kaspi_ID, PivEmpID_Valid), 1, 0) as FlagM_KMP_List,
+    IF(Exists(Uprox_ID, PivEmpID_Valid), 1, 0) as FlagM_UPR_List
+RESIDENT User_Segmentation;
+
+// Подтягиваем в эту же строку статус из прошлого месяца
+LEFT JOIN (Migration_Map)
+LOAD
+    PivEmpID_Valid as MigEmpID_Valid,
+    Date(PivMonthYear, 'MMMM YYYY') as PreviousMonth,
+    User_Segment as Previous_Segment
+RESIDENT User_Segmentation;
+
+User_Quarter_Pivot:
+LOAD
+    EmpID_Valid as Q_EmpID_Valid,
+    QuarterStart(FullDate) as PivQuarter, 
+    Sum(IF(PASS_CATEGORY = 'CARD', 1, 0))    as CARD,
+    Sum(IF(PASS_CATEGORY = 'KMP', 1, 0))     as KMP,
+    Sum(IF(PASS_CATEGORY = 'U-PROX', 1, 0))  as [U-PROX],
+    Sum(IF(PASS_CATEGORY = 'FACEID', 1, 0))  as [FACE-ID],
+    Count(DISTINCT FullDate)                 as TotalDays
+RESIDENT LOGS_PRE
+GROUP BY EmpID_Valid, QuarterStart(FullDate);
+
+User_Quarter_Segmentation:
+LOAD
+    *,
+    IF(KMP_Share >= 0.75, 'Преимущественно KMP',
+    IF(FACE_Share >= 0.75, 'Преимущественно FACE-ID',
+    IF(CARD_Share >= 0.75, 'Преимущественно CARD',
+    IF(UPROX_Share >= 0.75, 'Преимущественно U-PROX',
+    IF((KMP_Share + FACE_Share) >= 0.75 AND KMP_Share > 0.1 AND FACE_Share > 0.1, 'KMP + FACE-ID',
+    IF((KMP_Share + CARD_Share) >= 0.75 AND KMP_Share > 0.1 AND CARD_Share > 0.1, 'KMP + CARD',
+    IF((KMP_Share + UPROX_Share) >= 0.75 AND KMP_Share > 0.1 AND UPROX_Share > 0.1, 'KMP + U-PROX',
+    IF((FACE_Share + CARD_Share) >= 0.75 AND FACE_Share > 0.1 AND CARD_Share > 0.1, 'FACE-ID + CARD',
+    IF((FACE_Share + UPROX_Share) >= 0.75 AND FACE_Share > 0.1 AND UPROX_Share > 0.1, 'FACE-ID + U-PROX',
+    IF((CARD_Share + UPROX_Share) >= 0.75 AND CARD_Share > 0.1 AND UPROX_Share > 0.1, 'CARD + U-PROX',
+    'Смешанный профиль')))))))))) as User_Quarter_Segment,
+    IF(Exists(Kaspi_ID, Q_EmpID_Valid), 1, 0) as FlagQ_KMP_List,
+    IF(Exists(Uprox_ID, Q_EmpID_Valid), 1, 0) as FlagQ_UPR_List;
+
+LOAD
+    Q_EmpID_Valid, PivQuarter, CARD, KMP, [U-PROX], [FACE-ID], TotalDays,
+    CARD / TotalDays as CARD_Share,
+    KMP / TotalDays as KMP_Share,
+    [U-PROX] / TotalDays as UPROX_Share,
+    [FACE-ID] / TotalDays as FACE_Share
+RESIDENT User_Quarter_Pivot;
+
+DROP TABLE User_Quarter_Pivot;
+
+Quarter_Migration_Map_Temp:
+LOAD
+    Q_EmpID_Valid as MigQ_EmpID_Valid,
+    PivQuarter as CurrentQuarter,
+    QuarterStart(AddMonths(PivQuarter, -3)) as PreviousQuarter,
+    User_Quarter_Segment as Current_Q_Segment
+RESIDENT User_Quarter_Segmentation;
+
+// 2. Подтягиваем сегмент прошлого квартала по датам
+LEFT JOIN (Quarter_Migration_Map_Temp)
+LOAD
+    Q_EmpID_Valid as MigQ_EmpID_Valid,
+    PivQuarter as PreviousQuarter,
+    User_Quarter_Segment as Previous_Q_Segment
+RESIDENT User_Quarter_Segmentation;
+
+// 3. Финальный проход: превращаем даты в нормальный текст
+Quarter_Migration_Map:
+LOAD
+    MigQ_EmpID_Valid,
+    Current_Q_Segment,
+    Previous_Q_Segment,
+    // Текстовое название для текущего квартала
+    'Q' & Ceil(Month(CurrentQuarter)/3) & ' ' & Year(CurrentQuarter) as Current_Quarter_Name,
+    // Текстовое название для предыдущего квартала
+    'Q' & Ceil(Month(PreviousQuarter)/3) & ' ' & Year(PreviousQuarter) as Previous_Quarter_Name,
+    CurrentQuarter,  // Оставляем для сортировки
+    PreviousQuarter,  // Оставляем для сортировки
+    IF(Exists(Kaspi_ID, MigQ_EmpID_Valid), 1, 0) as FlagMQ_KMP_List,
+    IF(Exists(Uprox_ID, MigQ_EmpID_Valid), 1, 0) as FlagMQ_UPR_List
+RESIDENT Quarter_Migration_Map_Temp;
+
+DROP TABLE Quarter_Migration_Map_Temp;
+DROP TABLE User_Quarter_Segmentation;
+
+
+

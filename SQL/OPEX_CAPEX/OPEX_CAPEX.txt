@@ -1,0 +1,800 @@
+OPEXtemp: //Таблица фактов (проводок ДБУ) временная
+LOAD 
+
+  MonthName(date(Floor(PDIBSO_REP_DATE))) as MY,
+  Month(date(Floor(PDIBSO_REP_DATE))) as MM,
+  year(PDIBSO_REP_DATE) as Y,
+  date(floor(PDIBSO_REP_DATE)) AS [O_Дата],
+  PDIBSO_DEBET_NUMBER AS [O_СГК Дебет],
+  PDIBSO_CREDIT_NUMBER AS [O_СГК Кредит],
+  if(isnull(PDIBSO_DOC_NUMBER),Num(0),Num(PDIBSO_DOC_NUMBER)) AS [O_Номер],
+  
+  Num(BUSINESS_CODE) AS [КХЕ],
+  PDIBSO_RECIPIENT AS [O_Получатель],
+  PDIBSO_PAYER AS [O_Плательщик],
+  Num(PDIBSO_BRANCH_CODE) AS [FIL],
+  PDIBSO_GROUP_EXPENSE_NAME AS [O_Группа затрат],
+  Num(PDIBSO_CODE_EXPENSE) AS [O_Код затрат],
+  C_NAME_EXPENSE AS [O_Наименование затрат],
+  BALANCE_ACCOUNT AS [O_Баланс],
+  replace(if(isnull(PDIBSO_SERVICE_PROVIDER),'',PDIBSO_SERVICE_PROVIDER),'  ',' ') AS [O_Поставщик],
+  PDIBSO_CREATOR AS [O_Создано],
+  PDIBSO_CONFIRMS AS [O_Проведено],
+  PDIBSO_PAYMENT_DETAILS AS [O_Назначение],
+  PDIBSO_PRODUCT_KT AS [O_Документ],
+  PDIBSO_AMOUNT AS [O_Сумма],
+  PDIBSO_DOC_ID AS [O_ID],
+  DSKEY,
+  if(PDIBSO_GROUP_EXPENSE_NAME like 'Аренда', UPPER(PRIL3&DDD&SPLR3)) as RentKey,
+  SPLR3,
+  DDD,
+  If(year(MD)-year(PDIBSO_REP_DATE)<2 and Month(PDIBSO_REP_DATE)<=Month(Today())-1, 'Период к Периоду' ) as [ПериодКПериоду]
+  ,PRIL3
+  ,PRILKEY
+  ,trim(if(PDIBSO_GROUP_EXPENSE_NAME like 'Расходы на служебные командировки',Trim(if([PDIBSO_PAYMENT_DETAILS] like '*Списание БИЗНЕС: командировки по Казахстану*за период*', TextBetween([PDIBSO_PAYMENT_DETAILS],'Списание БИЗНЕС: командировки по Казахстану','за период'),
+  if([PDIBSO_PAYMENT_DETAILS] like '*(БИЗНЕС: командировки по Казахстану)*№*', TextBetween([PDIBSO_PAYMENT_DETAILS],'(БИЗНЕС: командировки по Казахстану)','№'),
+  if([PDIBSO_PAYMENT_DETAILS] like '*М.О.Л.:*Cогл*', TextBetween([PDIBSO_PAYMENT_DETAILS],'М.О.Л.:','Cогл.'),
+  if([PDIBSO_PAYMENT_DETAILS] like '*(БИЗНЕС: зарубежные командировки)*№*', TextBetween([PDIBSO_PAYMENT_DETAILS],'(БИЗНЕС: зарубежные командировки)','№'),
+  if([PDIBSO_PAYMENT_DETAILS] like '*Списание БИЗНЕС: зарубежные командировки*за период*', TextBetween([PDIBSO_PAYMENT_DETAILS],'Списание БИЗНЕС: зарубежные командировки','за период')
+  ,if([PDIBSO_PAYMENT_DETAILS] like '*Урегулирование излишне начисленной суммы*с-но*', TextBetween([PDIBSO_PAYMENT_DETAILS],'командировки по Казахстану','с-но')
+  ,if([PDIBSO_PAYMENT_DETAILS] like '*системной*BTMC.KZ*', 'Cистемна BTMC.KZ')))))))))) as TripInf
+;
+
+
+SQL
+Select 
+  A.*
+  ,Max(PDIBSO_REP_DATE) over (partition by 1) AS MD
+  ,CASE WHEN DDD IS NOT NULL THEN UPPER(DDD||SPLR3) ELSE NULL END AS DSKEY
+  ,CASE WHEN PRIL3 IS NOT NULL AND DDD IS NOT NULL THEN PRIL3||'К'||UPPER(DDD)
+  	 	WHEN DDD IS NOT NULL THEN DDD
+  	ELSE NULL
+  END AS PRILKEY
+from (
+Select 
+A.*
+
+,CASE
+WHEN PDIBSO_SERVICE_PROVIDER NOT LIKE 'Возмещение' AND PDIBSO_SERVICE_PROVIDER IS NOT NULL AND NZNCH LIKE '%Договор№%'
+THEN SUBSTR(DD,1,INSTR(lower(DD),' от ')-1)||CHR(32)||'ОТ'||CHR(32)||SUBSTR(DD,INSTR(lower(DD),' от ')+4,10) 
+ELSE NULL
+END as DDD
+
+,CASE
+WHEN SPLR2 LIKE '% %' and SUBSTR(SPLR2,1, INSTR(SPLR2,CHR(32))-1) IS NOT NULL
+THEN UPPER(SUBSTR(SPLR2,1, INSTR(SPLR2,CHR(32))-1))
+ELSE UPPER(SPLR2)    
+END AS SPLR3,
+SUBSTR(PRIL2,1,INSTR(lower(PRIL2),' ')-1) as PRIL3
+
+from(
+Select 
+A.*,
+//Извлекаем правую часть после 'Договор№'
+CASE
+WHEN NZNCH LIKE '%Договор№%' THEN
+REPLACE(TRIM(SUBSTR(NZNCH,INSTR(NZNCH,'Договор№')+8)),'.','/')
+ELSE NULL 
+END as DD,
+//Извлекаем название поставщика после ИП, АО, ТОО и др.
+CASE 
+WHEN SPLR LIKE '%О %'
+THEN SUBSTR(SPLR,INSTR(SPLR,'О ')+2)
+WHEN SPLR LIKE 'ИП %'
+THEN SUBSTR(SPLR,INSTR(SPLR,'ИП ')+3)
+WHEN SPLR LIKE 'КХ %'
+THEN SUBSTR(SPLR,INSTR(SPLR,'КХ ')+3)
+ELSE SPLR
+END AS SPLR2,
+//Извлекаем правую часть после 'прил.№'
+CASE
+WHEN PRIL LIKE '%прил.№%' THEN
+SUBSTR(PRIL,INSTR(PRIL,'прил.№')+6)
+ELSE NULL 
+END as PRIL2
+
+from
+(select --+parallel(20)
+apdv.*,
+
+C_NAME_EXPENSE
+
+//Приводим различные варианты написания "Договор" к единому виду, чтобы далее извлечь номер договора
+,REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(PDIBSO_PAYMENT_DETAILS,'договору №','Договор№'),' договору','Договор№'),'дог.№','Договор№'),'Дог.№','Договор№'),'дог. № ','Договор№'),'пуб.договору','Договор№') as NZNCH
+//Избавляемся от кавычек и других знаков в наименовании поставщика
+,REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(PDIBSO_SERVICE_PROVIDER,'"',''),CHR(39),''),'',''),'«',''),'»','') AS SPLR
+//Приводим различные варианты написания "Приложение" к единому виду, чтобы далее извлечь номер приложения
+,REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(PDIBSO_PAYMENT_DETAILS),'приложение №','прил.№'),'прил.№ ','прил.№'),'прил .№ ','прил.№'),'прил. №','прил.№'),'прил. № ','прил.№'),'прил. ','прил.№'),'прил .','прил.№') as PRIL
+
+
+//'Приложение №'|'прил.№ '|'прил .№ '|'прил. №'|'прил. № '|'прил. '|'прил .') 
+
+  from BI.f$alloc_payment_docs_vw apdv
+ 
+// справочник с наименование кодов затрат
+join bi.f$spr_code_expense_ibso_v c
+    on pdibso_expense_id = c.id
+
+// Фильтр по дате проводок
+ where pdibso_rep_date >= date '2022-01-01' 
+
+// Фильтр по КХЕ
+and business_code in ('101','102','103','104','105','106','107','108','109','110','111','112','1120','113','114','1140',
+   '115','116','1160','117','118','123','1240','1245','1250','127','1270','128','1300','131','1310','1320','1330','1340','1350',
+   '1360','1370','139','140','142','143','1800','501','502','503','902','999')   
+
+// Фильтр по коду затрат
+    and pdibso_code_expense in ('1652001','1652002','1652004','1653001','1653002','1653003','1653004','1653005','1653006','1653008','1653010','1653099','1654001','1654002',
+    '1654003','1654005','1654007','1654008','1654009','1654010','1654011','1654012','1654013','1654016','1654018','1654020','1654023','1654024','1654099','1657001','1657099','1658001','1658002','1659001','1659002','1659004',
+    '2101','2102','2103','2104','2105','2111','2112','2113','2115','2120','2121','2122','2123','2126','2127','2131','2132','2133','2135','2136','2138','2201','2202','2203','2204','2205','2206','2207','2208','2209','2210',
+    '2213','2301','2302','2303','2304','2406','2409','2412','2416','2509','2510','2520','2602','2603','2711','2712','2721','2722','2801','2802','2805','2806','2807','2808','2850','2901','2902','2906')
+    
+    and BALANCE_ACCOUNT not in ('5734')
+
+and pdibso_payment_details is not null) A
+)A
+)A
+
+ ;
+ 
+OPEX: //Таблица фактов (проводок ДБУ) загружаемая в модель
+LOAD 
+  if(year(today())=Year([O_Дата]),1,0) as ТекущийГод,
+
+  MY,
+  MM,
+  Y,
+  [O_Дата],
+  [O_СГК Дебет],
+  [O_СГК Кредит],
+  [O_Номер],
+  [КХЕ],
+  [O_Получатель],
+  [O_Плательщик],
+  [FIL],
+  [O_Группа затрат],
+  [O_Код затрат],
+  [O_Наименование затрат],
+  [O_Баланс],
+  [O_Поставщик],
+  [O_Создано],
+  [O_Проведено],
+  [O_Назначение],
+  [O_Документ],
+  [O_Сумма],
+  [O_ID],
+  [ПериодКПериоду],
+  DSKEY,
+  RentKey,
+  RentKey as RKEY2,
+  DDD,
+  PRIL3,
+  PRILKEY
+  ,SPLR3
+  ,if(WildMatch([O_Код затрат],'2301', '2303', '2304'), SPLR3&Fabs(ROUND([O_Сумма]))) as SMETKEY
+
+  ,trim(if(TripInf like '* *(*', left(TripInf,index(TripInf,'(')-1), 
+  if(TripInf like '* *-*', 
+  if(SubStringCount(TripInf,' ') = 2, left(TripInf,Index(TripInf,' ',2)), left(TripInf,Index(TripInf,' ',3))),TripInf))) as [Сотрудник],
+
+  trim(Replace(Replace(if([O_Назначение] Like '*М.О.Л.:*Cогл*', 'Начисление суточных',
+  if(TripInf like '*(*)*', TextBetween(TripInf,'(',')'),
+  if(TripInf like '* *-*',SubField(TripInf,' ',SubStringCount(TripInf,' ')+1)))),'г.',''),'c.','')) as [Направление]
+
+RESIDENT OPEXtemp;
+ 
+Drop Table OPEXtemp;
+
+SmetaOpex:
+
+LOAD 
+     C_NAZN AS [СметНазначение],
+     C_OBJECT AS [СметОбъект],
+     C_DISCRIPTION AS [СметОписание],
+     SMETKEY,
+     SPLR2 as SPLRSMet,
+     QOBG,
+     FROMW
+     ;
+
+
+SQL
+
+SELECT A.* FROM
+(
+SELECT A.*
+,ROW_NUMBER() OVER (PARTITION BY SmetKey ORDER BY C_SUMMA2 DESC) AS RMM
+
+FROM
+(SELECT A.*, 'SMETSUM' as FROMW
+
+FROM(
+SELECT A.*
+,ROW_NUMBER() OVER (PARTITION BY SPLR2,C_ESTIMATE_SUM ORDER BY SPLR2, C_ESTIMATE_SUM, C_DATE_REQ) AS RM
+,UPPER(SPLR2)||C_ESTIMATE_SUM AS SmetKey
+,COUNT(distinct C_OBJECT) OVER (PARTITION BY SPLR2||C_ESTIMATE_SUM) AS QOBG
+
+FROM(
+SELECT A.*,
+
+CASE
+WHEN SPLR LIKE '% % %'
+THEN DWH_SAN.STR_P.EXTRACT(SPLR,CHR(32),CHR(32))
+WHEN SPLR LIKE '% %'
+THEN SUBSTR(SPLR,INSTR(SPLR,' '))
+ELSE SPLR 
+END as SPLR2
+
+FROM
+(SELECT  A1.C_DATE_REQ C_DATE_REQ --ДАТА ЗАЯВКИ
+      , C2.C_CODE C_KHE_REQ --КХЕ СЧЕТА
+      , C3.C_CODE C_KHE_BUD --КХЕ БЮДЖЕТА
+      , C4.C_CODE_EXPENSE C_COST_CODE --КОД ЗАТРАТ
+      , C4.C_NAME_EXPENSE C_COST_NAME --НАИМЕНОВАНИЕ ЗАТРАТ
+      , A1.C_NUM C_REQ_NUM --НОМЕР ЗАЯВКИ
+      
+      , CASE WHEN NOT REGEXP_LIKE(C4.C_CODE_EXPENSE,'^2850') AND NVL(A1.C_NDS,'0') = '1'
+             THEN (B1.C_SUMMA/100)*(100+12)
+               ELSE B1.C_SUMMA END C_SUMMA --СУММА ПЛАТЕЖА (С НДС)
+      ///
+      ,Round(C_SUMMA) C_SUMMA2
+      ,A1.C_NDS
+      ,TRIM(UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(A1.C_SUPPLIER,'"',''),CHR(39),''),'',''),'«',''),'»',''),CHR(10),'')))  AS SPLR
+      ///
+      , A1.C_SUPPLIER C_SUPPLIER--НАИМЕНОВАНИЕ ПОСТАВЩИКА/МОЛ
+      , A1.C_NAZN C_NAZN --НАЗНАЧЕНИЕ ПЛАТЕЖА
+      , CASE WHEN A1.C_IN_BUDGET = '1' THEN 'Да' ELSE 'Нет' END  C_IN_BUDGET --В БЮДЖЕТЕ
+      , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Branch>','</Branch>') AS C_OBJECT
+      , Round(TO_NUMBER(REPLACE(REPLACE(DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Amount>','</Amount>'),' ',''),',','.'))) AS C_ESTIMATE_SUM
+     , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Description>', '</Description>') AS C_DISCRIPTION
+     
+      , A3.C_NAME C_INIT_NAME -- ИНИЦИАТОР ЗАЯВКИ
+  FROM S06.Z#SPR_CODE_EXPENSE C4
+     , S06.Z#HOZED C3
+     , S06.Z#HOZED C2
+     , S06.Z#TMC_RASH_STATS C1
+     , S06.Z#TMC_DOG_LIST B1
+     , S06.Z#USER A3
+     , S06.Z#PRODUCT A2
+     , S06.Z#KAS_REQUEST_PAY A1
+  WHERE A1.ID=A2.ID AND A2.C_CREATE_USER=A3.ID(+) AND C1.C_KXE=C2.ID(+) AND C1.C_KXE_2=C3.ID(+) AND C1.C_COSTS_CODE=C4.ID(+)
+    AND (A1.STATE_ID = 'PAID'
+  /*  AND A1.C_DATE_REQ >= IN_DATEBEG
+    AND A1.C_DATE_REQ <= IN_DATEEND+1 */
+    AND A1.C_REQ_ID_1C IS NOT NULL
+    AND A1.C_DOP_REC_1C IS NOT NULL
+    AND B1.C_REQUEST_PAY = A1.ID
+    AND C1.C_REQUEST_PAY_ARR = B1.COLLECTION_ID
+    
+  // AND A1.C_SUPPLIER NOT LIKE '%П%Кадыро%'
+)
+  ORDER BY A1.C_DATE_REQ,C3.C_CODE) A
+  
+  WHERE Round(C_ESTIMATE_SUM)<>Round(C_SUMMA2)
+  AND C_COST_CODE IN ('2301','2303','2304','2850')
+  
+) A) A
+WHERE RM = 1
+
+
+UNION
+/////
+SELECT A.*, 'SMETSUM2' as FROMW
+
+FROM(
+SELECT A.*
+,ROW_NUMBER() OVER (PARTITION BY SPLR2,C_ESTIMATE_SUM ORDER BY SPLR2, C_ESTIMATE_SUM, C_DATE_REQ) AS RM
+,UPPER(SPLR2)||C_ESTIMATE_SUM AS SmetKey
+,COUNT(distinct C_OBJECT) OVER (PARTITION BY SPLR2||C_ESTIMATE_SUM) AS QOBG
+
+FROM(
+SELECT A.*,
+
+CASE
+WHEN SPLR LIKE '% % %'
+THEN DWH_SAN.STR_P.EXTRACT(SPLR,CHR(32),CHR(32))
+WHEN SPLR LIKE '% %'
+THEN SUBSTR(SPLR,INSTR(SPLR,' '))
+ELSE SPLR 
+END as SPLR2
+
+FROM
+(SELECT  A1.C_DATE_REQ C_DATE_REQ --ДАТА ЗАЯВКИ
+      , C2.C_CODE C_KHE_REQ --КХЕ СЧЕТА
+      , C3.C_CODE C_KHE_BUD --КХЕ БЮДЖЕТА
+      , C4.C_CODE_EXPENSE C_COST_CODE --КОД ЗАТРАТ
+      , C4.C_NAME_EXPENSE C_COST_NAME --НАИМЕНОВАНИЕ ЗАТРАТ
+      , A1.C_NUM C_REQ_NUM --НОМЕР ЗАЯВКИ
+      
+      , CASE WHEN NOT REGEXP_LIKE(C4.C_CODE_EXPENSE,'^2850') AND NVL(A1.C_NDS,'0') = '1'
+             THEN (B1.C_SUMMA/100)*(100+12)
+               ELSE B1.C_SUMMA END C_SUMMA --СУММА ПЛАТЕЖА (С НДС)
+      ///
+      ,Round(C_SUMMA) C_SUMMA2
+      ,A1.C_NDS
+      ,TRIM(UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(A1.C_SUPPLIER,'"',''),CHR(39),''),'',''),'«',''),'»',''),CHR(10),'')))  AS SPLR
+      ///
+      , A1.C_SUPPLIER C_SUPPLIER--НАИМЕНОВАНИЕ ПОСТАВЩИКА/МОЛ
+      , A1.C_NAZN C_NAZN --НАЗНАЧЕНИЕ ПЛАТЕЖА
+      , CASE WHEN A1.C_IN_BUDGET = '1' THEN 'Да' ELSE 'Нет' END  C_IN_BUDGET --В БЮДЖЕТЕ
+      , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Branch>','</Branch>') AS C_OBJECT
+      , Round(TO_NUMBER(REPLACE(REPLACE(DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Amount>','</Amount>'),' ',''),',','.'))/1.12) AS C_ESTIMATE_SUM
+     , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Description>', '</Description>') AS C_DISCRIPTION
+     
+      , A3.C_NAME C_INIT_NAME -- ИНИЦИАТОР ЗАЯВКИ
+  FROM S06.Z#SPR_CODE_EXPENSE C4
+     , S06.Z#HOZED C3
+     , S06.Z#HOZED C2
+     , S06.Z#TMC_RASH_STATS C1
+     , S06.Z#TMC_DOG_LIST B1
+     , S06.Z#USER A3
+     , S06.Z#PRODUCT A2
+     , S06.Z#KAS_REQUEST_PAY A1
+  WHERE A1.ID=A2.ID AND A2.C_CREATE_USER=A3.ID(+) AND C1.C_KXE=C2.ID(+) AND C1.C_KXE_2=C3.ID(+) AND C1.C_COSTS_CODE=C4.ID(+)
+    AND (A1.STATE_ID = 'PAID'
+  /*  AND A1.C_DATE_REQ >= IN_DATEBEG
+    AND A1.C_DATE_REQ <= IN_DATEEND+1 */
+    AND A1.C_REQ_ID_1C IS NOT NULL
+    AND A1.C_DOP_REC_1C IS NOT NULL
+    AND B1.C_REQUEST_PAY = A1.ID
+    AND C1.C_REQUEST_PAY_ARR = B1.COLLECTION_ID
+    
+  // AND A1.C_SUPPLIER NOT LIKE '%П%Кадыро%'
+)
+  ORDER BY A1.C_DATE_REQ,C3.C_CODE) A
+  
+  WHERE Round(C_ESTIMATE_SUM)<>Round(C_SUMMA2)
+  AND C_COST_CODE IN ('2301','2303','2304','2850')
+  
+) A) A
+WHERE RM = 1
+
+
+
+
+/////
+UNION
+
+SELECT A.*, 'PAYSUM' as FROMW
+
+FROM(
+SELECT A.*
+,ROW_NUMBER() OVER (PARTITION BY SPLR2,C_SUMMA2 ORDER BY SPLR2, C_SUMMA2, C_DATE_REQ) AS RM
+,UPPER(SPLR2)||C_SUMMA2 AS SmetKey
+,COUNT(distinct C_OBJECT) OVER (PARTITION BY SPLR2||C_SUMMA) AS QOBG
+
+FROM(
+SELECT A.*,
+
+CASE
+WHEN SPLR LIKE '% % %'
+THEN DWH_SAN.STR_P.EXTRACT(SPLR,CHR(32),CHR(32))
+WHEN SPLR LIKE '% %'
+THEN SUBSTR(SPLR,INSTR(SPLR,' '))
+ELSE SPLR 
+END as SPLR2
+
+FROM
+(SELECT  A1.C_DATE_REQ C_DATE_REQ --ДАТА ЗАЯВКИ
+      , C2.C_CODE C_KHE_REQ --КХЕ СЧЕТА
+      , C3.C_CODE C_KHE_BUD --КХЕ БЮДЖЕТА
+      , C4.C_CODE_EXPENSE C_COST_CODE --КОД ЗАТРАТ
+      , C4.C_NAME_EXPENSE C_COST_NAME --НАИМЕНОВАНИЕ ЗАТРАТ
+      , A1.C_NUM C_REQ_NUM --НОМЕР ЗАЯВКИ
+      
+      , CASE WHEN NOT REGEXP_LIKE(C4.C_CODE_EXPENSE,'^2850') AND NVL(A1.C_NDS,'0') = '1'
+             THEN (B1.C_SUMMA/100)*(100+12)
+               ELSE B1.C_SUMMA END C_SUMMA --СУММА ПЛАТЕЖА (С НДС)
+      ///
+      ,Round(C_SUMMA) C_SUMMA2
+      ,A1.C_NDS
+      ,TRIM(UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(A1.C_SUPPLIER,'"',''),CHR(39),''),'',''),'«',''),'»',''),CHR(10),'')))  AS SPLR
+      ///
+      , A1.C_SUPPLIER C_SUPPLIER--НАИМЕНОВАНИЕ ПОСТАВЩИКА/МОЛ
+      , A1.C_NAZN C_NAZN --НАЗНАЧЕНИЕ ПЛАТЕЖА
+      , CASE WHEN A1.C_IN_BUDGET = '1' THEN 'Да' ELSE 'Нет' END  C_IN_BUDGET --В БЮДЖЕТЕ
+      , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Branch>','</Branch>') AS C_OBJECT
+      , TO_NUMBER(REPLACE(REPLACE(DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Amount>','</Amount>'),' ',''),',','.')) AS C_ESTIMATE_SUM
+     , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Description>', '</Description>') AS C_DISCRIPTION
+     
+      , A3.C_NAME C_INIT_NAME -- ИНИЦИАТОР ЗАЯВКИ
+  FROM S06.Z#SPR_CODE_EXPENSE C4
+     , S06.Z#HOZED C3
+     , S06.Z#HOZED C2
+     , S06.Z#TMC_RASH_STATS C1
+     , S06.Z#TMC_DOG_LIST B1
+     , S06.Z#USER A3
+     , S06.Z#PRODUCT A2
+     , S06.Z#KAS_REQUEST_PAY A1
+  WHERE A1.ID=A2.ID AND A2.C_CREATE_USER=A3.ID(+) AND C1.C_KXE=C2.ID(+) AND C1.C_KXE_2=C3.ID(+) AND C1.C_COSTS_CODE=C4.ID(+)
+    AND (A1.STATE_ID = 'PAID'
+  /*  AND A1.C_DATE_REQ >= IN_DATEBEG
+    AND A1.C_DATE_REQ <= IN_DATEEND+1 */
+    AND A1.C_REQ_ID_1C IS NOT NULL
+    AND A1.C_DOP_REC_1C IS NOT NULL
+    AND B1.C_REQUEST_PAY = A1.ID
+    AND C1.C_REQUEST_PAY_ARR = B1.COLLECTION_ID
+    
+  // AND A1.C_SUPPLIER NOT LIKE '%П%Кадыро%'
+)
+  ORDER BY A1.C_DATE_REQ,C3.C_CODE) A
+  
+WHERE C_COST_CODE IN ('2301','2303','2304','2850')
+  
+) A) A
+WHERE RM = 1
+
+) A) A WHERE RMM = 1
+
+  
+  ;
+
+
+[SPRKXEOPEX]: //Справочник КХЕ и обобщенного наименования подразделений
+Load 
+
+КХЕ,
+Lev1,
+Lev2
+
+inline [
+КХЕ|Lev2|Lev1
+501|Терминалы|Поддержка
+502|POS-терминалы|Поддержка
+503|Банкоматы|Поддержка
+902|Тех поддержка|Поддержка
+999|Закуп.Тех.код|Закуп
+1120|Бэк-офис|Бэк-офис
+1140|Документация|Инфраструктура
+1160|Выпуск карт|Поддержка
+1240|Физическая охрана|Режим
+1245|Техническая охрана|Режим
+1250|Инкассация|Cash Management
+1270|ЦБО|Cash Management
+1300|Снабжение|Инфраструктура
+1310|Обслуживание|Инфраструктура
+1320|Транспорт|Инфраструктура
+1330|Закуп|Закуп
+1340|Маркетинг|Инфраструктура
+1350|Инженерные Системы|Инфраструктура
+1360|БиОТ|Инфраструктура
+1370|Строительство и ремонт|Инфраструктура
+1800|Сопровождение клиентов|Поддержка
+
+
+
+] (delimiter is '|');
+
+ //Справочник КХЕ филиалов
+
+[SPRFILOPEX]:
+
+Load 
+
+FIL,
+FILNAME
+
+
+inline [
+
+FIL|FILNAME
+101|Астана
+102|Актау
+103|Атырау
+104|Актобе
+105|Павлодар
+106|Жезказган
+107|Караганда
+108|Кокшетау
+109|Кызылорда
+110|Костанай
+111|Семей
+112|Талдыкорган
+113|Уральск
+114|Усть-Каменогорск
+115|Тараз
+116|Шымкент
+118|Туркестан
+123|Южная Столица
+127|Талгар
+128|Кордай
+131|Петропавловск
+139|Кульсары
+140|Экибастуз
+143|Семей
+142|Жезказган
+501|Терминалы
+502|POS-терминалы
+503|Банкоматы
+902|Тех поддержка
+999|Закуп.Тех.код
+1120|Бэк-офис
+1140|Документация
+1160|Выпуск карт
+1240|Физическая охрана
+1245|Техническая охрана
+1250|Инкассация
+1270|ЦБО
+1300|Снабжение
+1310|Обслуживание
+1320|Транспорт
+1330|Закуп
+1340|Маркетинг
+1350|Инженерные Системы
+1360|БиОТ
+1370|Строительство и ремонт
+1800|Сопровождение клиентов
+
+
+
+
+] (delimiter is '|');
+
+
+
+
+SPRRENT: //Справочник по арендуемым объектам из Excel-файла
+
+LOAD
+    RentKey,
+    Adress,
+    RentType
+FROM [lib://kaspi_service (hq_samenov_55251)/RENT_ADRESSPR_.xlsx]
+(ooxml, embedded labels, table is OpexRentSPR);
+
+
+
+SPRKXECAPEX:
+
+Load
+
+C_КХЕ as [С_Хоз. ед-ца],
+Level2,
+Level1
+
+INLINE [
+C_КХЕ|Level2|Level1
+101|Астана|Инфраструктура
+102|Актау|Инфраструктура
+103|Атырау|Инфраструктура
+104|Актобе|Инфраструктура
+105|Павлодар|Инфраструктура
+106|Жезказган|Инфраструктура
+107|Караганда|Инфраструктура
+108|Кокшетау|Инфраструктура
+109|Кызылорда|Инфраструктура
+110|Костанай|Инфраструктура
+111|Семей|Инфраструктура
+112|Талдыкорган|Инфраструктура
+113|Уральск|Инфраструктура
+114|Усть-Каменогорск|Инфраструктура
+115|Тараз|Инфраструктура
+116|Шымкент|Инфраструктура
+118|Туркестан|Инфраструктура
+123|Южная Столица|Инфраструктура
+127|Талгар|Инфраструктура
+128|Кордай|Инфраструктура
+131|Петропавловск|Инфраструктура
+139|Кульсары|Инфраструктура
+140|Экибастуз|Инфраструктура
+501|Терминалы|Тех.сопровождение
+502|POS-терминалы|Тех.сопровождение
+503|Банкоматы|Тех.сопровождение
+902|Тех поддержка|Тех.сопровождение
+999|Закуп.Тех.код|Закуп
+1120|Бэк-офис|Бэк-офис
+1140|Документация|Инфраструктура
+1160|Выпуск карт|Тех.сопровождение
+1240|УООР|Режим
+1245|УИТО|Режим
+1250|Инкассация|Cash-менеджмент
+1270|ЦБО|Cash-менеджмент
+1300|Снабжение|Инфраструктура
+1310|Обслуживание|Инфраструктура
+1320|Транспорт|Инфраструктура
+1330|Закуп|Закуп
+1340|Управление маркетингового закупа|Инфраструктура
+1800|Сопровождение клиентов|Поддержка клиентов
+1350|Инженерные Системы|Инфраструктура
+1360|БиОТ|Инфраструктура
+1370|Строительство и ремонт|Инфраструктура
+
+
+] (delimiter is '|');
+
+RentSPR2: //Справочник по арендуемым объектам из отчёта по аренде
+
+Load
+	  Distinct
+
+
+      RKEY2,
+      CONCAT( DISTINCT TYPE,'\\') as TYPE,
+      CONCAT( DISTINCT DIVISIONNAME,'\\') as DIVISIONNAME,
+      CONCAT( DISTINCT JURAD,'\\') as JURAD   
+      
+      
+      From [lib://QVD Tables/RentSTR.qvd] (qvd)
+
+      Where 
+      Upper(OWNERSHIPTYPE) like '*РЕНД*'
+      and
+      date(PERIOD,'DD.MM.YYYY')>='01.01.2022'
+      and
+      (date(contractExpirationDate,'DD.MM.YYYY')='01.01.0001'
+      or
+      date(PERIOD,'DD.MM.YYYY')<=date(contractExpirationDate,'DD.MM.YYYY')
+      or
+      date(PERIOD,'DD.MM.YYYY')<=date(prolongationExpirationDate,'DD.MM.YYYY'))
+      
+      
+      Group BY
+
+      RKEY2;
+
+[DKaspiService]: // из файла
+
+LOAD
+    Контрагент as ДКонтрагент,
+    ПредметДоговора as ДПредмет,
+    Обоснование as ДОбоснование,
+    СуммаДоговора as ДСумма,
+    Назначение  as ДНазначение,
+    Адрес as ДАдресс,
+    DKey as PRILKEY
+FROM [lib://kaspi_service (hq_samenov_55251)/DKaspiServise.xlsx]
+(ooxml, embedded labels, table is DPril);
+
+[DSKaspiService]:
+
+LOAD
+
+    DSDate,
+    ПредметДоговора as [DSПредмет],
+    Обоснование as [DSОбоснование],
+    DSkey as DSKEY
+    
+FROM [lib://kaspi_service (hq_samenov_55251)/DKaspiServise.xlsx]
+(ooxml, embedded labels, table is DS);
+
+SmetaCapex:
+
+LOAD 
+
+      
+      C_REQ_NUM AS [С_Номер документа],
+      C_NAZN AS [Назначение платежа],
+      C_OBJECT AS [СметОбъект],
+      C_DISCRIPTION AS [Краткое описание],
+     
+     
+      SUM(C_SUMMA2) as SmetSUM
+
+    
+    GROUP By
+      C_REQ_NUM,
+      C_NAZN,
+      C_OBJECT,
+      C_DISCRIPTION,
+      
+
+ 
+ 
+    
+    
+     ;
+
+SQL
+SELECT 
+//DISTINCT 
+A.* FROM
+(SELECT  
+	   
+       //DISTINCT
+		
+        A1.C_DATE_REQ C_DATE_REQ --ДАТА ЗАЯВКИ
+      , C2.C_CODE C_KHE_REQ --КХЕ СЧЕТА
+      , C3.C_CODE C_KHE_BUD --КХЕ БЮДЖЕТА
+      , C4.C_CODE_EXPENSE C_COST_CODE --КОД ЗАТРАТ
+      , C4.C_NAME_EXPENSE C_COST_NAME --НАИМЕНОВАНИЕ ЗАТРАТ
+      , A1.C_NUM C_REQ_NUM --НОМЕР ЗАЯВКИ
+      , CASE WHEN NOT REGEXP_LIKE(C4.C_CODE_EXPENSE,'^2850') AND NVL(A1.C_NDS,'0') = '1'
+             THEN (B1.C_SUMMA/100)*(100+12)
+               ELSE B1.C_SUMMA END C_SUMMA --СУММА ПЛАТЕЖА (С НДС)
+      
+      ,Round(C_SUMMA) C_SUMMA2
+//       ,A1.C_NDS
+      ,TRIM(UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(A1.C_SUPPLIER,'"',''),CHR(39),''),'',''),'«',''),'»',''),CHR(10),'')))  AS SPLR
+      ///
+      , A1.C_SUPPLIER C_SUPPLIER--НАИМЕНОВАНИЕ ПОСТАВЩИКА/МОЛ
+      , A1.C_NAZN C_NAZN --НАЗНАЧЕНИЕ ПЛАТЕЖА
+      , CASE WHEN A1.C_IN_BUDGET = '1' THEN 'Да' ELSE 'Нет' END  C_IN_BUDGET --В БЮДЖЕТЕ
+      , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Branch>','</Branch>') AS C_OBJECT
+      , TO_NUMBER(REPLACE(REPLACE(DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Amount>','</Amount>'),' ',''),',','.')) AS C_ESTIMATE_SUM
+//       , REPLACE(DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Amount>','</Amount>'),' ','') AS C_ESTIMATE_SUM2
+     , DWH_SAN.STR_P.EXTRACT(A1.C_DOP_REC_1C, '<Description>', '</Description>') AS C_DISCRIPTION
+     
+      , A3.C_NAME C_INIT_NAME -- ИНИЦИАТОР ЗАЯВКИ
+
+
+  FROM S06.Z#SPR_CODE_EXPENSE C4
+     , S06.Z#HOZED C3
+     , S06.Z#HOZED C2
+     , S06.Z#TMC_RASH_STATS C1
+     , S06.Z#TMC_DOG_LIST B1
+     , S06.Z#USER A3
+     , S06.Z#PRODUCT A2
+     , S06.Z#KAS_REQUEST_PAY A1
+  WHERE A1.ID=A2.ID AND A2.C_CREATE_USER=A3.ID(+) AND C1.C_KXE=C2.ID(+) AND C1.C_KXE_2=C3.ID(+) AND C1.C_COSTS_CODE=C4.ID(+)
+    AND (A1.STATE_ID = 'PAID'
+  /*  AND A1.C_DATE_REQ >= IN_DATEBEG
+    AND A1.C_DATE_REQ <= IN_DATEEND+1 */
+    AND A1.C_REQ_ID_1C IS NOT NULL
+    AND A1.C_DOP_REC_1C IS NOT NULL
+    AND B1.C_REQUEST_PAY = A1.ID
+    AND C1.C_REQUEST_PAY_ARR = B1.COLLECTION_ID)
+  ORDER BY A1.C_DATE_REQ) A
+  //, C3.C_CODE
+  ;
+  
+SmetAdress: //Справочник с нормальными адресами из 1С для смет
+  
+LOAD
+    OBJECT AS [СметОбъект],
+    ADDRESNEWDIR AS [Адрес1С]
+FROM [lib://kaspi_service (hq_samenov_55251)/RENT_ADRESSPR_.xlsx]
+(ooxml, embedded labels, table is SPR_REP);
+
+[CAPEX]:
+Load
+
+date(floor(D_D)) AS [С_Дата],
+num(C_CODE) AS [С_Счет ГК],
+D_D AS [С_Дата документа],
+C_NUM AS [С_Номер документа],
+C_SUMMA_PLAT AS [С_Сумма платежа],
+num(if(H_CODE='1240','1245',H_CODE)) AS [С_Хоз. ед-ца],
+num(H_CODE2) AS [С_Хоз. ед-ца 2],
+C_NAZN AS [С_Назначение платежа],
+C_NAME AS [С_Создано пользователем],
+C_SUPPLIER AS [С_Поставщик],
+C_HOZ AS [С_Наименование хозяйственной единицы],
+C_NAME_CODE AS [С_Наименование кода затрат],
+S_MNTH AS [С_Месяц],
+S_YEAR AS [С_Год],
+PLAN_SUM AS [С_План];
+
+
+
+select *
+
+
+from
+
+BI.F$DM_PAYMENT_DOC_IBSO_BB_QLIK_V
+
+Командировки:
+LOAD
+    Y,
+    MY,
+    [O_Дата],
+    [КХЕ],
+    [O_Группа затрат],
+    [O_Код затрат],
+    [O_Наименование затрат],
+    [O_Поставщик],
+    [O_Назначение],
+    [O_Сумма],
+    [ПериодКПериоду],
+    [Сотрудник],
+    [Направление]
+RESIDENT OPEX
+WHERE [O_Группа затрат] = 'Расходы на служебные командировки';
+
+LEFT JOIN (Командировки)
+LOAD КХЕ, Lev1, Lev2
+RESIDENT [SPRKXEOPEX];
+
+STORE Командировки INTO [lib://QVD Tables/KaspiService/Командировки.qvd] (qvd);
+
+DROP TABLE Командировки;
